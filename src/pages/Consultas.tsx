@@ -41,7 +41,16 @@ import {
   FileText,
   History,
   RefreshCw,
+  Archive,
+  MoreVertical,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { consultarIntimacoes, forcarAtualizacaoConsulta, IntimacaoResult } from "@/lib/api";
 import { 
@@ -56,6 +65,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { useNavigate } from "react-router-dom";
 import { TribunalSelector } from "@/components/TribunalSelector";
+import { supabase } from "@/integrations/supabase/client";
 
 // Lista completa de horários disponíveis (todas as horas)
 const horariosDisponiveis = [
@@ -99,8 +109,16 @@ export default function Consultas() {
 
   const loadConsultas = async () => {
     try {
-      const data = await getConsultas();
-      setConsultas(data);
+      // Carregar apenas consultas não arquivadas e não excluídas
+      const { data, error } = await supabase
+        .from('consultas')
+        .select('*')
+        .eq('arquivado', false)
+        .is('excluido_em', null)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      setConsultas(data || []);
     } catch (error) {
       console.error("Erro ao carregar consultas:", error);
       toast({
@@ -208,19 +226,39 @@ export default function Consultas() {
   };
 
   const handleDelete = async (consulta: Consulta) => {
-    if (!confirm(`Tem certeza que deseja excluir a consulta "${consulta.nome}"?`)) {
-      return;
-    }
-    
     try {
-      await deleteConsulta(consulta.id);
+      // Mover para lixeira em vez de excluir permanentemente
+      await supabase
+        .from('consultas')
+        .update({ excluido_em: new Date().toISOString() })
+        .eq('id', consulta.id);
+      
       await loadConsultas();
       toast({
-        title: "Consulta excluída",
+        title: "Consulta movida para lixeira",
       });
     } catch (error) {
       toast({
         title: "Erro ao excluir consulta",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleArchive = async (consulta: Consulta) => {
+    try {
+      await supabase
+        .from('consultas')
+        .update({ arquivado: true })
+        .eq('id', consulta.id);
+      
+      await loadConsultas();
+      toast({
+        title: "Consulta arquivada",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro ao arquivar consulta",
         variant: "destructive",
       });
     }
@@ -670,22 +708,31 @@ export default function Consultas() {
                             >
                               <RefreshCw className="h-4 w-4" />
                             </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              title="Editar"
-                              onClick={() => handleEditConsulta(consulta)}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              onClick={() => handleDelete(consulta)}
-                              title="Excluir"
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleEditConsulta(consulta)}>
+                                  <Pencil className="mr-2 h-3 w-3" />
+                                  Editar
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleArchive(consulta)}>
+                                  <Archive className="mr-2 h-3 w-3" />
+                                  Arquivar
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem 
+                                  className="text-destructive"
+                                  onClick={() => handleDelete(consulta)}
+                                >
+                                  <Trash2 className="mr-2 h-3 w-3" />
+                                  Excluir
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </TableCell>
                       </TableRow>
