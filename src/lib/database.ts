@@ -165,11 +165,11 @@ export async function getAllResultados() {
 export async function saveResultados(consultaId: string, resultados: unknown[]) {
   const registros = resultados.map((r: any) => {
     // A API retorna campos com nomes variados, precisamos normalizar
-    // Formatos possíveis: camelCase (da nossa interface) ou snake_case/mixto (da API real)
-    const numeroProcesso = r.numeroProcesso || r.numero_processo || r.numeroprocessocommascara || null;
-    const siglaTribunal = r.siglaTribunal || r.sigla_tribunal || r.siglaTribunal || null;
-    const nomeOrgao = r.nomeOrgao || r.nome_orgao || r.nomeOrgao || null;
-    const tipoComunicacao = r.tipoComunicacao || r.tipo_comunicacao || r.tipoComunicacao || null;
+    // Campos podem vir em camelCase, snake_case ou minúsculo sem separador
+    const numeroProcesso = r.numeroProcesso || r.numero_processo || r.numeroprocessocommascara || r.numero_processo_completo || null;
+    const siglaTribunal = r.siglaTribunal || r.sigla_tribunal || r.siglatribunal || null;
+    const nomeOrgao = r.nomeOrgao || r.nome_orgao || r.nomeorgao || null;
+    const tipoComunicacao = r.tipoComunicacao || r.tipo_comunicacao || r.tipocomunicacao || null;
     
     // Data pode vir em vários formatos
     let dataDisponibilizacao = r.dataDisponibilizacao || r.data_disponibilizacao || null;
@@ -178,6 +178,17 @@ export async function saveResultados(consultaId: string, resultados: unknown[]) 
       const parts = r.datadisponibilizacao.split('/');
       if (parts.length === 3) {
         dataDisponibilizacao = `${parts[2]}-${parts[1]}-${parts[0]}`;
+      }
+    }
+    // Se ainda não tem e vem como data_disponibilizacao no formato YYYY-MM-DD
+    if (!dataDisponibilizacao && r.data_disponibilizacao && typeof r.data_disponibilizacao === 'string') {
+      if (r.data_disponibilizacao.includes('-')) {
+        dataDisponibilizacao = r.data_disponibilizacao;
+      } else if (r.data_disponibilizacao.includes('/')) {
+        const parts = r.data_disponibilizacao.split('/');
+        if (parts.length === 3) {
+          dataDisponibilizacao = `${parts[2]}-${parts[1]}-${parts[0]}`;
+        }
       }
     }
     
@@ -189,7 +200,7 @@ export async function saveResultados(consultaId: string, resultados: unknown[]) 
       }
     }
     
-    // Texto da mensagem
+    // Texto da mensagem - pode vir em diferentes campos
     const textoMensagem = r.textoMensagem || r.texto_mensagem || r.texto || null;
     
     // Destinatários podem vir de diferentes campos
@@ -215,7 +226,50 @@ export async function saveResultados(consultaId: string, resultados: unknown[]) 
     .select();
   
   if (error) throw error;
+  
+  // Também salvar no RAG (documento_chunks) para consulta via chat
+  for (const registro of registros) {
+    if (registro.texto_mensagem || registro.numero_processo) {
+      await saveResultadoParaRAG(registro);
+    }
+  }
+  
   return data;
+}
+
+// Função para salvar resultado no sistema RAG
+async function saveResultadoParaRAG(registro: any) {
+  try {
+    const conteudo = `
+PROCESSO: ${registro.numero_processo || 'Não informado'}
+TRIBUNAL: ${registro.sigla_tribunal || 'Não informado'}
+ÓRGÃO: ${registro.nome_orgao || 'Não informado'}
+TIPO: ${registro.tipo_comunicacao || 'Não informado'}
+DATA DISPONIBILIZAÇÃO: ${registro.data_disponibilizacao || 'Não informada'}
+DATA PUBLICAÇÃO: ${registro.data_publicacao || 'Não informada'}
+
+CONTEÚDO:
+${registro.texto_mensagem || JSON.stringify(registro.dados_completos?.texto || registro.dados_completos, null, 2)}
+`.trim();
+
+    const { error } = await supabase
+      .from('documento_chunks')
+      .insert({
+        conteudo,
+        chunk_index: 0,
+        numero_processo: registro.numero_processo,
+        metadata: {
+          tipo: 'resultado_consulta',
+          tribunal: registro.sigla_tribunal,
+          data_disponibilizacao: registro.data_disponibilizacao,
+          consulta_id: registro.consulta_id,
+        }
+      });
+    
+    if (error) console.error('Erro ao salvar chunk RAG:', error);
+  } catch (e) {
+    console.error('Erro ao processar RAG:', e);
+  }
 }
 
 // Config Cadernos
