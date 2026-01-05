@@ -48,11 +48,24 @@ const horariosDisponiveis = [
   "21:00", "21:30", "22:00", "22:30", "23:00",
 ];
 
+// Lista completa de tribunais do PJe/ComunicaAPI
 const tribunaisDisponiveis = [
-  "TJSP", "TJRJ", "TJMG", "TJRS", "TJPR", "TJSC",
-  "TRF1", "TRF2", "TRF3", "TRF4", "TRF5",
-  "TRT1", "TRT2", "TRT3", "TRT4", "TRT5",
-  "TST", "STJ", "STF",
+  // Justiça Federal
+  "TRF1", "TRF2", "TRF3", "TRF4", "TRF5", "TRF6",
+  // Justiça do Trabalho
+  "TST", "TRT1", "TRT2", "TRT3", "TRT4", "TRT5", "TRT6", "TRT7", "TRT8", 
+  "TRT9", "TRT10", "TRT11", "TRT12", "TRT13", "TRT14", "TRT15", "TRT16", 
+  "TRT17", "TRT18", "TRT19", "TRT20", "TRT21", "TRT22", "TRT23", "TRT24",
+  // Justiça Estadual
+  "TJAP", "TJBA", "TJCE", "TJDFT", "TJES", "TJMA", "TJMG", "TJMT", 
+  "TJPA", "TJPB", "TJPE", "TJPI", "TJRJ", "TJRN", "TJRO", "TJRS", "TJPR", "TJSC", "TJSP",
+  // Justiça Eleitoral
+  "TSE", "TREAC", "TREAL", "TREAM", "TREAP", "TREBA", "TRECE", "TREDF",
+  "TREES", "TREGO", "TREMA", "TREMG", "TREMS", "TREMT", "TREPA", "TREPB",
+  "TREPE", "TREPI", "TREPR", "TRERJ", "TRERN", "TRERO", "TRERR", "TRERS",
+  "TRESC", "TRESE", "TRESP", "TRETO",
+  // Tribunais Superiores
+  "STJ", "STF",
 ];
 
 const statusConfig = {
