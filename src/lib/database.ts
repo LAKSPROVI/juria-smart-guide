@@ -163,18 +163,51 @@ export async function getAllResultados() {
 }
 
 export async function saveResultados(consultaId: string, resultados: unknown[]) {
-  const registros = resultados.map((r: any) => ({
-    consulta_id: consultaId,
-    numero_processo: r.numeroProcesso,
-    sigla_tribunal: r.siglaTribunal,
-    nome_orgao: r.nomeOrgao,
-    tipo_comunicacao: r.tipoComunicacao,
-    data_disponibilizacao: r.dataDisponibilizacao,
-    data_publicacao: r.dataPublicacao,
-    texto_mensagem: r.textoMensagem,
-    destinatarios: r.destinatarios,
-    dados_completos: r,
-  }));
+  const registros = resultados.map((r: any) => {
+    // A API retorna campos com nomes variados, precisamos normalizar
+    // Formatos possíveis: camelCase (da nossa interface) ou snake_case/mixto (da API real)
+    const numeroProcesso = r.numeroProcesso || r.numero_processo || r.numeroprocessocommascara || null;
+    const siglaTribunal = r.siglaTribunal || r.sigla_tribunal || r.siglaTribunal || null;
+    const nomeOrgao = r.nomeOrgao || r.nome_orgao || r.nomeOrgao || null;
+    const tipoComunicacao = r.tipoComunicacao || r.tipo_comunicacao || r.tipoComunicacao || null;
+    
+    // Data pode vir em vários formatos
+    let dataDisponibilizacao = r.dataDisponibilizacao || r.data_disponibilizacao || null;
+    if (!dataDisponibilizacao && r.datadisponibilizacao) {
+      // Converter formato DD/MM/YYYY para YYYY-MM-DD
+      const parts = r.datadisponibilizacao.split('/');
+      if (parts.length === 3) {
+        dataDisponibilizacao = `${parts[2]}-${parts[1]}-${parts[0]}`;
+      }
+    }
+    
+    let dataPublicacao = r.dataPublicacao || r.data_publicacao || null;
+    if (!dataPublicacao && r.datapublicacao) {
+      const parts = r.datapublicacao.split('/');
+      if (parts.length === 3) {
+        dataPublicacao = `${parts[2]}-${parts[1]}-${parts[0]}`;
+      }
+    }
+    
+    // Texto da mensagem
+    const textoMensagem = r.textoMensagem || r.texto_mensagem || r.texto || null;
+    
+    // Destinatários podem vir de diferentes campos
+    const destinatarios = r.destinatarios || r.destinatarioadvogados || [];
+    
+    return {
+      consulta_id: consultaId,
+      numero_processo: numeroProcesso,
+      sigla_tribunal: siglaTribunal,
+      nome_orgao: nomeOrgao,
+      tipo_comunicacao: tipoComunicacao,
+      data_disponibilizacao: dataDisponibilizacao,
+      data_publicacao: dataPublicacao,
+      texto_mensagem: textoMensagem,
+      destinatarios: destinatarios,
+      dados_completos: r,
+    };
+  });
 
   const { data, error } = await supabase
     .from('resultados_consultas')
