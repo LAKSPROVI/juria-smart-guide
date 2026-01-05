@@ -12,6 +12,7 @@ import {
   ClipboardList,
   Trash2,
   Archive,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -26,6 +27,7 @@ const navigation = [
   { name: "Registros", href: "/registros", icon: ClipboardList },
   { name: "Arquivo", href: "/arquivo", icon: Archive },
   { name: "Lixeira", href: "/lixeira", icon: Trash2 },
+  { name: "Usuários", href: "/usuarios", icon: Users },
   { name: "Configurações", href: "/configuracoes", icon: Settings },
 ];
 
