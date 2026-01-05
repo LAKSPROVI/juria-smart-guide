@@ -32,6 +32,29 @@ interface ChunkResultado {
   combined_score: number;
 }
 
+// Verificar autenticação do usuário
+async function verificarAutenticacao(req: Request): Promise<{ user: any; supabaseClient: any } | null> {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader) {
+    return null;
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  
+  const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+    global: { headers: { Authorization: authHeader } }
+  });
+
+  const { data: { user }, error } = await supabaseClient.auth.getUser();
+  
+  if (error || !user) {
+    return null;
+  }
+
+  return { user, supabaseClient };
+}
+
 // Gerar embedding para a query
 async function gerarEmbeddingQuery(texto: string, apiKey: string): Promise<number[]> {
   const response = await fetch('https://ai.gateway.lovable.dev/v1/embeddings', {
@@ -125,6 +148,7 @@ async function buscarContextoRAG(
   supabase: any, 
   pergunta: string, 
   apiKey: string,
+  userId: string,
   filtroDocumentoId?: string,
   filtroNumeroProcesso?: string
 ): Promise<{ contexto: string; fontes: any[] }> {
@@ -218,7 +242,7 @@ ${c.conteudo}
       return { contexto, fontes };
     }
 
-    // Último fallback: resultados de consultas
+    // Último fallback: resultados de consultas do usuário
     const { data: resultados, error: e2 } = await supabase
       .from('resultados_consultas')
       .select('numero_processo, sigla_tribunal, nome_orgao, tipo_comunicacao, texto_mensagem, data_disponibilizacao')
@@ -258,6 +282,18 @@ serve(async (req) => {
   }
 
   try {
+    // Verificar autenticação
+    const auth = await verificarAutenticacao(req);
+    if (!auth) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Autenticação necessária' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { user, supabaseClient } = auth;
+    console.log(`Usuário autenticado: ${user.email}`);
+
     const { messages, context, filtro_documento_id, filtro_numero_processo }: ChatRequest = await req.json();
     
     console.log("Recebendo requisição de chat:", messages.length, "mensagens");
@@ -267,19 +303,15 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY não configurada');
     }
 
-    // Criar cliente Supabase para buscar contexto do RAG
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
     // Pegar a última mensagem do usuário para buscar contexto relevante
     const ultimaMensagem = messages.filter(m => m.role === 'user').pop()?.content || '';
     
-    // Buscar contexto do RAG com busca híbrida
+    // Buscar contexto do RAG com busca híbrida (usando o cliente autenticado)
     const { contexto: contextoRAG, fontes } = await buscarContextoRAG(
-      supabase, 
+      supabaseClient, 
       ultimaMensagem, 
       apiKey,
+      user.id,
       filtro_documento_id,
       filtro_numero_processo
     );

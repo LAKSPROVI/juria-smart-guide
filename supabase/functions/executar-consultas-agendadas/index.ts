@@ -6,9 +6,58 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Esta função deve ser chamada apenas pelo cron job interno ou por admins
+// Verificar por service role key ou header especial de cron
+async function verificarAutorizacao(req: Request): Promise<boolean> {
+  const authHeader = req.headers.get('Authorization');
+  
+  // Se tem service role key, é chamada interna autorizada
+  if (authHeader?.includes(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '')) {
+    return true;
+  }
+  
+  // Verificar se é usuário autenticado admin
+  if (authHeader) {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    
+    const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } }
+    });
+
+    const { data: { user }, error } = await supabaseClient.auth.getUser();
+    
+    if (!error && user) {
+      // Verificar se é admin
+      const { data: roles } = await supabaseClient
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', user.id)
+        .eq('role', 'admin')
+        .single();
+      
+      if (roles) {
+        console.log(`Admin autorizado: ${user.email}`);
+        return true;
+      }
+    }
+  }
+  
+  return false;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  // Verificar autorização
+  const autorizado = await verificarAutorizacao(req);
+  if (!autorizado) {
+    return new Response(
+      JSON.stringify({ success: false, error: "Não autorizado" }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
   }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -132,8 +181,8 @@ serve(async (req) => {
           }
 
           const data = await apiResponse.json();
-          const resultados = Array.isArray(data) ? data : data.comunicacoes || data.items || [];
-          response = { success: true, data: resultados, total: resultados.length };
+          const resultadosList = Array.isArray(data) ? data : data.comunicacoes || data.items || [];
+          response = { success: true, data: resultadosList, total: resultadosList.length };
         }
 
         const duracao = Date.now() - inicio;

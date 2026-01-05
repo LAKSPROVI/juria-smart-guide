@@ -13,6 +13,29 @@ interface ExtrairRequest {
   processar_rag?: boolean;
 }
 
+// Verificar autenticação do usuário
+async function verificarAutenticacao(req: Request): Promise<{ user: any; supabaseClient: any } | null> {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader) {
+    return null;
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  
+  const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+    global: { headers: { Authorization: authHeader } }
+  });
+
+  const { data: { user }, error } = await supabaseClient.auth.getUser();
+  
+  if (error || !user) {
+    return null;
+  }
+
+  return { user, supabaseClient };
+}
+
 // Extrair texto de PDF usando pdf-lib (básico, para PDFs nato-digitais)
 async function extrairTextoPdfBasico(pdfBytes: Uint8Array): Promise<string> {
   // Método simples: buscar strings de texto no PDF
@@ -96,9 +119,17 @@ serve(async (req) => {
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    // Verificar autenticação
+    const auth = await verificarAutenticacao(req);
+    if (!auth) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Autenticação necessária' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { user, supabaseClient } = auth;
+    console.log(`Usuário autenticado: ${user.email}`);
 
     const body: ExtrairRequest = await req.json();
     const { documento_id, url_arquivo, metodo, processar_rag = true } = body;
@@ -111,7 +142,7 @@ serve(async (req) => {
 
     // Buscar documento do banco se ID fornecido
     if (documento_id && !url_arquivo) {
-      const { data: doc, error } = await supabase
+      const { data: doc, error } = await supabaseClient
         .from('documentos')
         .select('url_arquivo, nome, conteudo_texto')
         .eq('id', documento_id)
@@ -152,7 +183,7 @@ serve(async (req) => {
 
     // Atualizar status
     if (docId) {
-      await supabase
+      await supabaseClient
         .from('documentos')
         .update({ status: 'processando' })
         .eq('id', docId);
@@ -181,7 +212,7 @@ serve(async (req) => {
 
     // Salvar texto no documento
     if (docId) {
-      await supabase
+      await supabaseClient
         .from('documentos')
         .update({ 
           conteudo_texto: textoExtraido,
@@ -196,12 +227,12 @@ serve(async (req) => {
       console.log('Iniciando processamento RAG...');
       
       // Chamar função de processamento RAG (não bloqueia resposta)
-      supabase.functions.invoke('processar-documento-rag', {
+      supabaseClient.functions.invoke('processar-documento-rag', {
         body: {
           documento_id: docId,
           texto: textoExtraido,
         }
-      }).catch(e => console.error('Erro ao processar RAG:', e));
+      }).catch((e: Error) => console.error('Erro ao processar RAG:', e));
     }
 
     const resultado = {

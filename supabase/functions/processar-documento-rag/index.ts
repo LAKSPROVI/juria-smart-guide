@@ -14,6 +14,29 @@ interface ProcessarRequest {
   titulo?: string;
 }
 
+// Verificar autenticação do usuário
+async function verificarAutenticacao(req: Request): Promise<{ user: any; supabaseClient: any } | null> {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader) {
+    return null;
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  
+  const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+    global: { headers: { Authorization: authHeader } }
+  });
+
+  const { data: { user }, error } = await supabaseClient.auth.getUser();
+  
+  if (error || !user) {
+    return null;
+  }
+
+  return { user, supabaseClient };
+}
+
 // Configurações de chunking otimizadas
 const CHUNK_CONFIG = {
   tamanho_alvo: 512, // tokens aproximados
@@ -179,14 +202,27 @@ serve(async (req) => {
   }
 
   try {
+    // Verificar autenticação
+    const auth = await verificarAutenticacao(req);
+    if (!auth) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Autenticação necessária' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { user, supabaseClient } = auth;
+    console.log(`Usuário autenticado: ${user.email}`);
+
     const apiKey = Deno.env.get('LOVABLE_API_KEY');
     if (!apiKey) {
       throw new Error('LOVABLE_API_KEY não configurada');
     }
 
+    // Usar service role para operações de escrita em chunks
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
     const body: ProcessarRequest = await req.json();
     const { documento_id, caderno_id, texto, numero_processo, titulo } = body;
@@ -197,7 +233,7 @@ serve(async (req) => {
 
     // Buscar texto do documento se não fornecido
     if (!textoParaProcessar && documento_id) {
-      const { data: doc, error } = await supabase
+      const { data: doc, error } = await supabaseClient
         .from('documentos')
         .select('conteudo_texto, nome, numero_processo')
         .eq('id', documento_id)
@@ -219,7 +255,7 @@ serve(async (req) => {
 
     // Atualizar status na fila
     if (documento_id || caderno_id) {
-      await supabase
+      await supabaseAdmin
         .from('fila_processamento_rag')
         .update({ 
           status: 'processando',
@@ -238,7 +274,7 @@ serve(async (req) => {
 
     // Atualizar total de chunks
     if (documento_id || caderno_id) {
-      await supabase
+      await supabaseAdmin
         .from('fila_processamento_rag')
         .update({ total_chunks: chunks.length })
         .or(`documento_id.eq.${documento_id},caderno_id.eq.${caderno_id}`);
@@ -274,8 +310,8 @@ serve(async (req) => {
         // Extrair número de processo do chunk
         const processoChunk = numero_processo || extrairNumeroProcesso(chunk.conteudo);
 
-        // Salvar chunk no banco
-        const { data: chunkSalvo, error: erroChunk } = await supabase
+        // Salvar chunk no banco (usando service role)
+        const { data: chunkSalvo, error: erroChunk } = await supabaseAdmin
           .from('documento_chunks')
           .insert({
             documento_id: docId,
@@ -307,7 +343,7 @@ serve(async (req) => {
 
         // Atualizar progresso
         if ((documento_id || caderno_id) && i % 5 === 0) {
-          await supabase
+          await supabaseAdmin
             .from('fila_processamento_rag')
             .update({ 
               chunks_processados: chunksProcessados,
@@ -333,7 +369,7 @@ serve(async (req) => {
 
     // Atualizar status final
     if (documento_id) {
-      await supabase
+      await supabaseClient
         .from('documentos')
         .update({ 
           embedding_processado: true,
@@ -343,7 +379,7 @@ serve(async (req) => {
     }
 
     if (documento_id || caderno_id) {
-      await supabase
+      await supabaseAdmin
         .from('fila_processamento_rag')
         .update({ 
           status: 'concluido',

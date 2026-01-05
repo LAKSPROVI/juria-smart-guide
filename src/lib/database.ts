@@ -16,6 +16,7 @@ export interface Consulta {
   horarios: string[];
   ativo: boolean;
   ultima_execucao?: string;
+  user_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -76,6 +77,7 @@ export interface Documento {
   conteudo_texto?: string;
   embedding_processado: boolean;
   erro_mensagem?: string;
+  user_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -84,6 +86,7 @@ export interface Conversa {
   id: string;
   titulo: string;
   ultima_mensagem?: string;
+  user_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -97,6 +100,12 @@ export interface Mensagem {
   created_at: string;
 }
 
+// Função auxiliar para obter o user_id atual
+async function getCurrentUserId(): Promise<string | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  return user?.id || null;
+}
+
 // Consultas
 export async function getConsultas() {
   const { data, error } = await supabase
@@ -108,10 +117,13 @@ export async function getConsultas() {
   return data as Consulta[];
 }
 
-export async function createConsulta(consulta: Omit<Consulta, 'id' | 'created_at' | 'updated_at'>) {
+export async function createConsulta(consulta: Omit<Consulta, 'id' | 'created_at' | 'updated_at' | 'user_id'>) {
+  const userId = await getCurrentUserId();
+  if (!userId) throw new Error('Usuário não autenticado');
+
   const { data, error } = await supabase
     .from('consultas')
-    .insert(consulta)
+    .insert({ ...consulta, user_id: userId })
     .select()
     .single();
   
@@ -165,22 +177,18 @@ export async function getAllResultados() {
 export async function saveResultados(consultaId: string, resultados: unknown[]) {
   const registros = resultados.map((r: any) => {
     // A API retorna campos com nomes variados, precisamos normalizar
-    // Campos podem vir em camelCase, snake_case ou minúsculo sem separador
     const numeroProcesso = r.numeroProcesso || r.numero_processo || r.numeroprocessocommascara || r.numero_processo_completo || null;
     const siglaTribunal = r.siglaTribunal || r.sigla_tribunal || r.siglatribunal || null;
     const nomeOrgao = r.nomeOrgao || r.nome_orgao || r.nomeorgao || null;
     const tipoComunicacao = r.tipoComunicacao || r.tipo_comunicacao || r.tipocomunicacao || null;
     
-    // Data pode vir em vários formatos
     let dataDisponibilizacao = r.dataDisponibilizacao || r.data_disponibilizacao || null;
     if (!dataDisponibilizacao && r.datadisponibilizacao) {
-      // Converter formato DD/MM/YYYY para YYYY-MM-DD
       const parts = r.datadisponibilizacao.split('/');
       if (parts.length === 3) {
         dataDisponibilizacao = `${parts[2]}-${parts[1]}-${parts[0]}`;
       }
     }
-    // Se ainda não tem e vem como data_disponibilizacao no formato YYYY-MM-DD
     if (!dataDisponibilizacao && r.data_disponibilizacao && typeof r.data_disponibilizacao === 'string') {
       if (r.data_disponibilizacao.includes('-')) {
         dataDisponibilizacao = r.data_disponibilizacao;
@@ -200,10 +208,7 @@ export async function saveResultados(consultaId: string, resultados: unknown[]) 
       }
     }
     
-    // Texto da mensagem - pode vir em diferentes campos
     const textoMensagem = r.textoMensagem || r.texto_mensagem || r.texto || null;
-    
-    // Destinatários podem vir de diferentes campos
     const destinatarios = r.destinatarios || r.destinatarioadvogados || [];
     
     return {
@@ -224,7 +229,6 @@ export async function saveResultados(consultaId: string, resultados: unknown[]) 
   const registrosUnicos = [];
   
   for (const registro of registros) {
-    // Buscar se já existe registro idêntico no banco
     const { data: existente } = await supabase
       .from('resultados_consultas')
       .select('id')
@@ -237,13 +241,11 @@ export async function saveResultados(consultaId: string, resultados: unknown[]) 
       .eq('texto_mensagem', registro.texto_mensagem)
       .limit(1);
     
-    // Se não existe registro idêntico, adicionar à lista
     if (!existente || existente.length === 0) {
       registrosUnicos.push(registro);
     }
   }
 
-  // Se não há registros novos, retornar vazio
   if (registrosUnicos.length === 0) {
     console.log('Nenhum resultado novo encontrado - todos já existem no banco');
     return [];
@@ -258,49 +260,7 @@ export async function saveResultados(consultaId: string, resultados: unknown[]) 
   
   if (error) throw error;
   
-  // Também salvar no RAG (documento_chunks) para consulta via chat
-  for (const registro of registrosUnicos) {
-    if (registro.texto_mensagem || registro.numero_processo) {
-      await saveResultadoParaRAG(registro);
-    }
-  }
-  
   return data;
-}
-
-// Função para salvar resultado no sistema RAG
-async function saveResultadoParaRAG(registro: any) {
-  try {
-    const conteudo = `
-PROCESSO: ${registro.numero_processo || 'Não informado'}
-TRIBUNAL: ${registro.sigla_tribunal || 'Não informado'}
-ÓRGÃO: ${registro.nome_orgao || 'Não informado'}
-TIPO: ${registro.tipo_comunicacao || 'Não informado'}
-DATA DISPONIBILIZAÇÃO: ${registro.data_disponibilizacao || 'Não informada'}
-DATA PUBLICAÇÃO: ${registro.data_publicacao || 'Não informada'}
-
-CONTEÚDO:
-${registro.texto_mensagem || JSON.stringify(registro.dados_completos?.texto || registro.dados_completos, null, 2)}
-`.trim();
-
-    const { error } = await supabase
-      .from('documento_chunks')
-      .insert({
-        conteudo,
-        chunk_index: 0,
-        numero_processo: registro.numero_processo,
-        metadata: {
-          tipo: 'resultado_consulta',
-          tribunal: registro.sigla_tribunal,
-          data_disponibilizacao: registro.data_disponibilizacao,
-          consulta_id: registro.consulta_id,
-        }
-      });
-    
-    if (error) console.error('Erro ao salvar chunk RAG:', error);
-  } catch (e) {
-    console.error('Erro ao processar RAG:', e);
-  }
 }
 
 // Config Cadernos
@@ -370,6 +330,20 @@ export async function getDocumentos() {
   return data as Documento[];
 }
 
+export async function createDocumento(documento: Omit<Documento, 'id' | 'created_at' | 'updated_at' | 'user_id'>) {
+  const userId = await getCurrentUserId();
+  if (!userId) throw new Error('Usuário não autenticado');
+
+  const { data, error } = await supabase
+    .from('documentos')
+    .insert({ ...documento, user_id: userId })
+    .select()
+    .single();
+  
+  if (error) throw error;
+  return data as Documento;
+}
+
 export async function getDocumentosStats() {
   const { data: cadernos, error: e1 } = await supabase
     .from('documentos')
@@ -407,9 +381,12 @@ export async function getConversas() {
 }
 
 export async function createConversa(titulo: string) {
+  const userId = await getCurrentUserId();
+  if (!userId) throw new Error('Usuário não autenticado');
+
   const { data, error } = await supabase
     .from('conversas')
-    .insert({ titulo })
+    .insert({ titulo, user_id: userId })
     .select()
     .single();
   

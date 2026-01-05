@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -11,6 +12,29 @@ interface CadernoParams {
   tipo: string;
 }
 
+// Verificar autenticação do usuário
+async function verificarAutenticacao(req: Request): Promise<{ user: any; supabaseClient: any } | null> {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader) {
+    return null;
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  
+  const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+    global: { headers: { Authorization: authHeader } }
+  });
+
+  const { data: { user }, error } = await supabaseClient.auth.getUser();
+  
+  if (error || !user) {
+    return null;
+  }
+
+  return { user, supabaseClient };
+}
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -18,6 +42,18 @@ serve(async (req) => {
   }
 
   try {
+    // Verificar autenticação
+    const auth = await verificarAutenticacao(req);
+    if (!auth) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Autenticação necessária" }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { user } = auth;
+    console.log(`Usuário autenticado: ${user.email}`);
+
     const params: CadernoParams = await req.json();
     const { tribunal, data, tipo } = params;
     
