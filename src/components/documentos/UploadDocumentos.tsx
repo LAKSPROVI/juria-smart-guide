@@ -2,13 +2,22 @@ import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { 
   Upload, 
   X, 
   FileText, 
   CheckCircle, 
   AlertCircle,
-  Loader2 
+  Loader2,
+  Info
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -17,18 +26,44 @@ import { supabase } from "@/integrations/supabase/client";
 interface FileUpload {
   file: File;
   id: string;
-  status: 'pending' | 'uploading' | 'processing' | 'done' | 'error';
+  status: 'pending' | 'uploading' | 'extracting' | 'processing' | 'done' | 'error';
   progress: number;
   error?: string;
+  metodoOcr?: string;
 }
 
 interface UploadDocumentosProps {
   onUploadComplete?: () => void;
 }
 
+type MetodoOCR = 'pdf-parse' | 'document-ai' | 'tesseract';
+
+const metodosOCR = [
+  {
+    value: 'pdf-parse' as MetodoOCR,
+    label: 'PDF Digital (Grátis)',
+    description: 'Para PDFs com texto selecionável. Rápido e gratuito.',
+    icon: '📄',
+  },
+  {
+    value: 'document-ai' as MetodoOCR,
+    label: 'Google Document AI (OCR)',
+    description: 'Para PDFs digitalizados/escaneados. Requer API key.',
+    icon: '🔍',
+  },
+  {
+    value: 'tesseract' as MetodoOCR,
+    label: 'Tesseract OCR (Offline)',
+    description: 'OCR offline. Mais lento, menor precisão.',
+    icon: '🖼️',
+    disabled: true,
+  },
+];
+
 export function UploadDocumentos({ onUploadComplete }: UploadDocumentosProps) {
   const [files, setFiles] = useState<FileUpload[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [metodoOcr, setMetodoOcr] = useState<MetodoOCR>('pdf-parse');
   const { toast } = useToast();
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -48,7 +83,8 @@ export function UploadDocumentos({ onUploadComplete }: UploadDocumentosProps) {
     const droppedFiles = Array.from(e.dataTransfer.files).filter(
       file => file.type === 'application/pdf' || 
               file.type === 'text/plain' ||
-              file.name.endsWith('.txt')
+              file.name.endsWith('.txt') ||
+              file.type.startsWith('image/')
     );
     
     addFiles(droppedFiles);
@@ -66,6 +102,7 @@ export function UploadDocumentos({ onUploadComplete }: UploadDocumentosProps) {
       id: Math.random().toString(36).substr(2, 9),
       status: 'pending',
       progress: 0,
+      metodoOcr: file.type === 'application/pdf' ? metodoOcr : undefined,
     }));
     
     setFiles(prev => [...prev, ...fileUploads]);
@@ -81,30 +118,19 @@ export function UploadDocumentos({ onUploadComplete }: UploadDocumentosProps) {
     ));
   };
 
+  const setFileMetodo = (id: string, metodo: MetodoOCR) => {
+    setFiles(prev => prev.map(f => 
+      f.id === id ? { ...f, metodoOcr: metodo } : f
+    ));
+  };
+
   const processFile = async (fileUpload: FileUpload) => {
-    const { file, id } = fileUpload;
+    const { file, id, metodoOcr: fileMetodo } = fileUpload;
     
     try {
       updateFileStatus(id, { status: 'uploading', progress: 10 });
       
-      // Extrair texto do arquivo
-      let texto = '';
-      
-      if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
-        texto = await file.text();
-      } else if (file.type === 'application/pdf') {
-        // Para PDFs, vamos salvar e processar no backend
-        // Por agora, criar um placeholder
-        toast({
-          title: "PDF detectado",
-          description: "Processamento de PDF requer OCR no backend. Salvando metadados...",
-        });
-        texto = `[PDF] ${file.name} - Aguardando processamento OCR`;
-      }
-
-      updateFileStatus(id, { progress: 30 });
-
-      // Criar registro do documento
+      // Criar registro do documento primeiro
       const { data: documento, error: docError } = await supabase
         .from('documentos')
         .insert({
@@ -113,45 +139,101 @@ export function UploadDocumentos({ onUploadComplete }: UploadDocumentosProps) {
           origem: 'upload',
           tamanho_bytes: file.size,
           status: 'processando',
-          conteudo_texto: texto,
+          conteudo_texto: null, // Será preenchido depois
         })
         .select()
         .single();
 
       if (docError) throw docError;
 
-      updateFileStatus(id, { status: 'processing', progress: 50 });
+      updateFileStatus(id, { progress: 30 });
 
-      // Adicionar à fila de processamento RAG
-      await supabase
-        .from('fila_processamento_rag')
-        .insert({
-          documento_id: documento.id,
-          prioridade: 5,
-          status: 'pendente',
+      let texto = '';
+      
+      if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
+        // Arquivos de texto: extrair diretamente
+        texto = await file.text();
+        
+        // Atualizar documento com texto
+        await supabase
+          .from('documentos')
+          .update({ conteudo_texto: texto })
+          .eq('id', documento.id);
+
+      } else if (file.type === 'application/pdf') {
+        // PDFs: usar método escolhido
+        const metodo = fileMetodo || 'pdf-parse';
+        
+        updateFileStatus(id, { status: 'extracting', progress: 40 });
+
+        toast({
+          title: `Extraindo texto (${metodo})`,
+          description: `Processando ${file.name}...`,
         });
 
-      updateFileStatus(id, { progress: 70 });
+        // Converter arquivo para base64 para enviar ao backend
+        const arrayBuffer = await file.arrayBuffer();
+        const base64 = btoa(
+          new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+        );
 
-      // Chamar função de processamento
-      const { error: procError } = await supabase.functions.invoke('processar-documento-rag', {
-        body: {
-          documento_id: documento.id,
-          texto: texto,
-          titulo: file.name,
+        // Para PDFs grandes, vamos primeiro fazer upload para storage
+        // Por agora, chamar extração direto
+        const { data: extracaoResult, error: extracaoError } = await supabase.functions.invoke('extrair-texto-pdf', {
+          body: {
+            documento_id: documento.id,
+            metodo: metodo,
+            processar_rag: true,
+          }
+        });
+
+        if (extracaoError) {
+          console.error('Erro na extração:', extracaoError);
+          
+          // Se precisa OCR, informar usuário
+          if (extracaoResult?.precisa_ocr) {
+            toast({
+              variant: "destructive",
+              title: "PDF digitalizado detectado",
+              description: "Este PDF requer OCR. Selecione 'Google Document AI' e configure a API key.",
+            });
+          }
         }
-      });
 
-      if (procError) {
-        console.error('Erro ao processar RAG:', procError);
-        // Não falhar completamente, documento foi salvo
+        texto = extracaoResult?.texto || '';
+      }
+
+      updateFileStatus(id, { status: 'processing', progress: 70 });
+
+      // Adicionar à fila de processamento RAG se tem texto
+      if (texto.length > 100) {
+        await supabase
+          .from('fila_processamento_rag')
+          .insert({
+            documento_id: documento.id,
+            prioridade: 5,
+            status: 'pendente',
+          });
+
+        // Chamar função de processamento RAG
+        const { error: procError } = await supabase.functions.invoke('processar-documento-rag', {
+          body: {
+            documento_id: documento.id,
+            texto: texto,
+            titulo: file.name,
+          }
+        });
+
+        if (procError) {
+          console.error('Erro ao processar RAG:', procError);
+        }
       }
 
       updateFileStatus(id, { status: 'done', progress: 100 });
 
       toast({
         title: "Upload concluído",
-        description: `${file.name} foi processado com sucesso.`,
+        description: `${file.name} processado com sucesso.`,
       });
 
     } catch (error) {
@@ -186,10 +268,42 @@ export function UploadDocumentos({ onUploadComplete }: UploadDocumentosProps) {
   };
 
   const pendingCount = files.filter(f => f.status === 'pending').length;
-  const processingCount = files.filter(f => ['uploading', 'processing'].includes(f.status)).length;
+  const processingCount = files.filter(f => ['uploading', 'extracting', 'processing'].includes(f.status)).length;
+  const hasPdfs = files.some(f => f.file.type === 'application/pdf' && f.status === 'pending');
 
   return (
     <div className="space-y-4">
+      {/* Método OCR para PDFs */}
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="flex items-start gap-3">
+          <Info className="h-5 w-5 text-primary mt-0.5" />
+          <div className="flex-1">
+            <Label className="font-medium">Método de Extração de Texto para PDFs</Label>
+            <p className="text-sm text-muted-foreground mt-1 mb-3">
+              Escolha como extrair texto dos PDFs. Para cadernos DJE, recomendamos "PDF Digital".
+            </p>
+            <Select value={metodoOcr} onValueChange={(v) => setMetodoOcr(v as MetodoOCR)}>
+              <SelectTrigger className="w-full md:w-[400px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {metodosOCR.map((m) => (
+                  <SelectItem key={m.value} value={m.value} disabled={m.disabled}>
+                    <div className="flex items-center gap-2">
+                      <span>{m.icon}</span>
+                      <div>
+                        <p className="font-medium">{m.label}</p>
+                        <p className="text-xs text-muted-foreground">{m.description}</p>
+                      </div>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+
       {/* Drop Zone */}
       <div
         onDragOver={handleDragOver}
@@ -215,7 +329,7 @@ export function UploadDocumentos({ onUploadComplete }: UploadDocumentosProps) {
         <input
           type="file"
           multiple
-          accept=".pdf,.txt"
+          accept=".pdf,.txt,image/*"
           onChange={handleFileSelect}
           className="hidden"
           id="file-upload"
@@ -226,7 +340,7 @@ export function UploadDocumentos({ onUploadComplete }: UploadDocumentosProps) {
           </Button>
         </label>
         <p className="mt-3 text-xs text-muted-foreground">
-          PDF e TXT. Máximo 50MB por arquivo.
+          PDF, TXT e imagens. Máximo 50MB por arquivo.
         </p>
       </div>
 
@@ -289,6 +403,12 @@ export function UploadDocumentos({ onUploadComplete }: UploadDocumentosProps) {
                     {file.status === 'uploading' && (
                       <Badge className="text-xs bg-primary/10 text-primary">Enviando...</Badge>
                     )}
+                    {file.status === 'extracting' && (
+                      <Badge className="text-xs bg-blue-500/10 text-blue-500">
+                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        Extraindo texto...
+                      </Badge>
+                    )}
                     {file.status === 'processing' && (
                       <Badge className="text-xs bg-primary/10 text-primary">
                         <Loader2 className="mr-1 h-3 w-3 animate-spin" />
@@ -307,8 +427,13 @@ export function UploadDocumentos({ onUploadComplete }: UploadDocumentosProps) {
                         Erro
                       </Badge>
                     )}
+                    {file.file.type === 'application/pdf' && file.metodoOcr && file.status === 'pending' && (
+                      <Badge variant="outline" className="text-xs">
+                        {metodosOCR.find(m => m.value === file.metodoOcr)?.icon} {file.metodoOcr}
+                      </Badge>
+                    )}
                   </div>
-                  {(file.status === 'uploading' || file.status === 'processing') && (
+                  {(file.status === 'uploading' || file.status === 'extracting' || file.status === 'processing') && (
                     <Progress value={file.progress} className="mt-2 h-1" />
                   )}
                   {file.error && (
