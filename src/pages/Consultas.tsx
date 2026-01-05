@@ -55,26 +55,9 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { useNavigate } from "react-router-dom";
+import { TribunalSelector } from "@/components/TribunalSelector";
 
-// Lista completa de tribunais do PJe/ComunicaAPI
-const tribunais = [
-  // Justiça Federal
-  "TRF1", "TRF2", "TRF3", "TRF4", "TRF5", "TRF6",
-  // Justiça do Trabalho
-  "TST", "TRT1", "TRT2", "TRT3", "TRT4", "TRT5", "TRT6", "TRT7", "TRT8", 
-  "TRT9", "TRT10", "TRT11", "TRT12", "TRT13", "TRT14", "TRT15", "TRT16", 
-  "TRT17", "TRT18", "TRT19", "TRT20", "TRT21", "TRT22", "TRT23", "TRT24",
-  // Justiça Estadual
-  "TJAP", "TJBA", "TJCE", "TJDFT", "TJES", "TJMA", "TJMG", "TJMT", 
-  "TJPA", "TJPB", "TJPE", "TJPI", "TJRJ", "TJRN", "TJRO", "TJSP",
-  // Justiça Eleitoral
-  "TSE", "TREAC", "TREAL", "TREAM", "TREAP", "TREBA", "TRECE", "TREDF",
-  "TREES", "TREGO", "TREMA", "TREMG", "TREMS", "TREMT", "TREPA", "TREPB",
-  "TREPE", "TREPI", "TREPR", "TRERJ", "TRERN", "TRERO", "TRERR", "TRERS",
-  "TRESC", "TRESE", "TRESP", "TRETO",
-  // Tribunais Superiores
-  "STJ", "STF",
-];
+// Lista de horários disponíveis para agendamento
 
 const horariosDisponiveis = [
   "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00",
@@ -98,6 +81,7 @@ export default function Consultas() {
 
   // Form state
   const [formNome, setFormNome] = useState("");
+  const [formTribunais, setFormTribunais] = useState<string[]>([]);
   const [formTribunal, setFormTribunal] = useState("");
   const [formTipo, setFormTipo] = useState("");
   const [formTermo, setFormTermo] = useState("");
@@ -242,38 +226,36 @@ export default function Consultas() {
 
   const handleCriarConsulta = async () => {
     try {
-      await createConsulta({
-        nome: formNome || `${formTermo} - ${formTribunal}`,
-        tribunal: formTribunal,
-        tipo: formTipo,
-        termo: formTermo,
-        numero_oab: formNumeroOab || undefined,
-        uf_oab: formUfOab || undefined,
-        data_inicial: formDataInicio || undefined,
-        data_final: formDataFim || undefined,
-        recorrencia: formRecorrencia,
-        horarios: formHorarios,
-        ativo: true,
-      });
+      // Se múltiplos tribunais selecionados, criar uma consulta para cada
+      const tribunaisParaCriar = formTribunais.length > 0 ? formTribunais : [formTribunal];
+      
+      for (const tribunal of tribunaisParaCriar) {
+        await createConsulta({
+          nome: formNome || `${formTermo} - ${tribunal}`,
+          tribunal: tribunal,
+          tipo: formTipo,
+          termo: formTermo,
+          numero_oab: formNumeroOab || undefined,
+          uf_oab: formUfOab || undefined,
+          data_inicial: formDataInicio || undefined,
+          data_final: formDataFim || undefined,
+          recorrencia: formRecorrencia,
+          horarios: formHorarios,
+          ativo: true,
+        });
+      }
 
       setOpen(false);
       await loadConsultas();
       
       // Reset form
-      setFormNome("");
-      setFormTribunal("");
-      setFormTipo("");
-      setFormTermo("");
-      setFormNumeroOab("");
-      setFormUfOab("");
-      setFormDataInicio("");
-      setFormDataFim("");
-      setFormRecorrencia("manual");
-      setFormHorarios(["09:00"]);
+      resetForm();
       
       toast({
-        title: "Consulta criada",
-        description: "A nova consulta foi configurada com sucesso.",
+        title: "Consulta(s) criada(s)",
+        description: tribunaisParaCriar.length > 1 
+          ? `${tribunaisParaCriar.length} consultas foram criadas com sucesso.`
+          : "A nova consulta foi configurada com sucesso.",
       });
     } catch (error) {
       toast({
@@ -337,6 +319,7 @@ export default function Consultas() {
   const resetForm = () => {
     setFormNome("");
     setFormTribunal("");
+    setFormTribunais([]);
     setFormTipo("");
     setFormTermo("");
     setFormNumeroOab("");
@@ -414,34 +397,31 @@ export default function Consultas() {
                     onChange={(e) => setFormNome(e.target.value)}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label>Tribunal</Label>
-                    <Select value={formTribunal} onValueChange={setFormTribunal}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecione..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {tribunais.map((t) => (
-                          <SelectItem key={t} value={t}>{t}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid gap-2">
-                    <Label>Tipo de Busca</Label>
-                    <Select value={formTipo} onValueChange={setFormTipo}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecione..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="nome_advogado">Nome Advogado</SelectItem>
-                        <SelectItem value="oab">Número OAB</SelectItem>
-                        <SelectItem value="processo">Número Processo</SelectItem>
-                        <SelectItem value="parte">Nome Parte</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                <div className="grid gap-2">
+                  <Label>Tribunais</Label>
+                  <TribunalSelector
+                    value={formTribunais}
+                    onChange={setFormTribunais}
+                    placeholder="Selecione um ou mais tribunais..."
+                    multiple={true}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Selecione múltiplos tribunais para criar consultas em lote
+                  </p>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Tipo de Busca</Label>
+                  <Select value={formTipo} onValueChange={setFormTipo}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="nome_advogado">Nome Advogado</SelectItem>
+                      <SelectItem value="oab">Número OAB</SelectItem>
+                      <SelectItem value="processo">Número Processo</SelectItem>
+                      <SelectItem value="parte">Nome Parte</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 
                 <div className="grid gap-2">
@@ -538,7 +518,7 @@ export default function Consultas() {
                 <Button variant="outline" onClick={() => setOpen(false)}>
                   Cancelar
                 </Button>
-                <Button onClick={handleCriarConsulta} disabled={!formTribunal || !formTipo || !formTermo}>
+                <Button onClick={handleCriarConsulta} disabled={(formTribunais.length === 0 && !formTribunal) || !formTipo || !formTermo}>
                   Criar Consulta
                 </Button>
               </DialogFooter>
@@ -762,34 +742,28 @@ export default function Consultas() {
                   onChange={(e) => setFormNome(e.target.value)}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>Tribunal</Label>
-                  <Select value={formTribunal} onValueChange={setFormTribunal}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {tribunais.map((t) => (
-                        <SelectItem key={t} value={t}>{t}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label>Tipo de Busca</Label>
-                  <Select value={formTipo} onValueChange={setFormTipo}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="nome_advogado">Nome Advogado</SelectItem>
-                      <SelectItem value="oab">Número OAB</SelectItem>
-                      <SelectItem value="processo">Número Processo</SelectItem>
-                      <SelectItem value="parte">Nome Parte</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="grid gap-2">
+                <Label>Tribunal</Label>
+                <TribunalSelector
+                  value={formTribunal ? [formTribunal] : []}
+                  onChange={(vals) => setFormTribunal(vals[0] || "")}
+                  placeholder="Selecione o tribunal..."
+                  multiple={false}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Tipo de Busca</Label>
+                <Select value={formTipo} onValueChange={setFormTipo}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="nome_advogado">Nome Advogado</SelectItem>
+                    <SelectItem value="oab">Número OAB</SelectItem>
+                    <SelectItem value="processo">Número Processo</SelectItem>
+                    <SelectItem value="parte">Nome Parte</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               
               <div className="grid gap-2">

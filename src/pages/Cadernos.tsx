@@ -42,30 +42,11 @@ import {
   ConfigCaderno,
   Caderno 
 } from "@/lib/database";
+import { TribunalSelector, tribunaisDisponiveis as tribunaisLista } from "@/components/TribunalSelector";
 
 const horariosDisponiveis = [
   "18:00", "18:30", "19:00", "19:30", "20:00", "20:30", 
   "21:00", "21:30", "22:00", "22:30", "23:00",
-];
-
-// Lista completa de tribunais do PJe/ComunicaAPI
-const tribunaisDisponiveis = [
-  // Justiça Federal
-  "TRF1", "TRF2", "TRF3", "TRF4", "TRF5", "TRF6",
-  // Justiça do Trabalho
-  "TST", "TRT1", "TRT2", "TRT3", "TRT4", "TRT5", "TRT6", "TRT7", "TRT8", 
-  "TRT9", "TRT10", "TRT11", "TRT12", "TRT13", "TRT14", "TRT15", "TRT16", 
-  "TRT17", "TRT18", "TRT19", "TRT20", "TRT21", "TRT22", "TRT23", "TRT24",
-  // Justiça Estadual
-  "TJAP", "TJBA", "TJCE", "TJDFT", "TJES", "TJMA", "TJMG", "TJMT", 
-  "TJPA", "TJPB", "TJPE", "TJPI", "TJRJ", "TJRN", "TJRO", "TJRS", "TJPR", "TJSC", "TJSP",
-  // Justiça Eleitoral
-  "TSE", "TREAC", "TREAL", "TREAM", "TREAP", "TREBA", "TRECE", "TREDF",
-  "TREES", "TREGO", "TREMA", "TREMG", "TREMS", "TREMT", "TREPA", "TREPB",
-  "TREPE", "TREPI", "TREPR", "TRERJ", "TRERN", "TRERO", "TRERR", "TRERS",
-  "TRESC", "TRESE", "TRESP", "TRETO",
-  // Tribunais Superiores
-  "STJ", "STF",
 ];
 
 const statusConfig = {
@@ -101,7 +82,7 @@ export default function Cadernos() {
   const { toast } = useToast();
 
   // Form state for new config
-  const [newTribunal, setNewTribunal] = useState("");
+  const [newTribunais, setNewTribunais] = useState<string[]>([]);
   const [newHorarios, setNewHorarios] = useState<string[]>(["19:00"]);
   const [newTipos, setNewTipos] = useState<string[]>(["D"]);
 
@@ -165,28 +146,33 @@ export default function Cadernos() {
   };
 
   const handleAddConfig = async () => {
-    if (!newTribunal) return;
+    if (newTribunais.length === 0) return;
     
     try {
-      await createConfigCaderno({
-        tribunal: newTribunal,
-        ativo: true,
-        horarios: newHorarios,
-        tipos: newTipos,
-        processar_automaticamente: true,
-      });
+      // Criar configuração para cada tribunal selecionado
+      for (const tribunal of newTribunais) {
+        await createConfigCaderno({
+          tribunal: tribunal,
+          ativo: true,
+          horarios: newHorarios,
+          tipos: newTipos,
+          processar_automaticamente: true,
+        });
+      }
       setConfigOpen(false);
-      setNewTribunal("");
+      setNewTribunais([]);
       setNewHorarios(["19:00"]);
       setNewTipos(["D"]);
       await loadData();
       toast({
-        title: "Configuração adicionada",
+        title: newTribunais.length > 1 
+          ? `${newTribunais.length} tribunais configurados` 
+          : "Configuração adicionada",
       });
     } catch (error) {
       toast({
         title: "Erro ao adicionar configuração",
-        description: "Tribunal já pode estar configurado.",
+        description: "Um ou mais tribunais já podem estar configurados.",
         variant: "destructive",
       });
     }
@@ -219,9 +205,9 @@ export default function Cadernos() {
     return new Date(dateStr).toLocaleDateString("pt-BR");
   };
 
-  const tribunaisNaoConfigurados = tribunaisDisponiveis.filter(
-    t => !configs.find(c => c.tribunal === t)
-  );
+  const tribunaisNaoConfigurados = tribunaisLista
+    .map(t => t.value)
+    .filter(t => !configs.find(c => c.tribunal === t));
 
   if (loading) {
     return (
@@ -310,17 +296,17 @@ export default function Cadernos() {
               </DialogHeader>
               <div className="grid gap-4 py-4">
                 <div className="grid gap-2">
-                  <Label>Tribunal</Label>
-                  <Select value={newTribunal} onValueChange={setNewTribunal}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione o tribunal..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {tribunaisNaoConfigurados.map(t => (
-                        <SelectItem key={t} value={t}>{t}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label>Tribunais</Label>
+                  <TribunalSelector
+                    value={newTribunais}
+                    onChange={setNewTribunais}
+                    placeholder="Selecione um ou mais tribunais..."
+                    multiple={true}
+                    excludeTribunais={configs.map(c => c.tribunal)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Selecione múltiplos tribunais para configurar em lote
+                  </p>
                 </div>
                 <div className="grid gap-2">
                   <Label>Horários de Download</Label>
@@ -361,8 +347,8 @@ export default function Cadernos() {
                 <Button variant="outline" onClick={() => setConfigOpen(false)}>
                   Cancelar
                 </Button>
-                <Button onClick={handleAddConfig} disabled={!newTribunal}>
-                  Adicionar
+                <Button onClick={handleAddConfig} disabled={newTribunais.length === 0}>
+                  {newTribunais.length > 1 ? `Adicionar ${newTribunais.length} tribunais` : 'Adicionar'}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -430,16 +416,12 @@ export default function Cadernos() {
               <div className="grid gap-4 py-4">
                 <div className="grid gap-2">
                   <Label>Tribunal</Label>
-                  <Select value={downloadTribunal} onValueChange={setDownloadTribunal}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione o tribunal..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {tribunaisDisponiveis.map(t => (
-                        <SelectItem key={t} value={t}>{t}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <TribunalSelector
+                    value={downloadTribunal ? [downloadTribunal] : []}
+                    onChange={(vals) => setDownloadTribunal(vals[0] || "")}
+                    placeholder="Selecione o tribunal..."
+                    multiple={false}
+                  />
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="data">Data</Label>
