@@ -11,6 +11,8 @@ import Chat from "./pages/Chat";
 import Documentos from "./pages/Documentos";
 import Configuracoes from "./pages/Configuracoes";
 import Registros from "./pages/Registros";
+import Lixeira from "./pages/Lixeira";
+import Arquivo from "./pages/Arquivo";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -30,6 +32,8 @@ const App = () => (
           <Route path="/documentos" element={<Documentos />} />
           <Route path="/configuracoes" element={<Configuracoes />} />
           <Route path="/registros" element={<Registros />} />
+          <Route path="/lixeira" element={<Lixeira />} />
+          <Route path="/arquivo" element={<Arquivo />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

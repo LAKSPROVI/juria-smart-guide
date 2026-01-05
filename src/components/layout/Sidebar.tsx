@@ -10,6 +10,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Trash2,
+  Archive,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -22,6 +24,8 @@ const navigation = [
   { name: "Chat IA", href: "/chat", icon: MessageSquare },
   { name: "Documentos", href: "/documentos", icon: FolderOpen },
   { name: "Registros", href: "/registros", icon: ClipboardList },
+  { name: "Arquivo", href: "/arquivo", icon: Archive },
+  { name: "Lixeira", href: "/lixeira", icon: Trash2 },
   { name: "Configurações", href: "/configuracoes", icon: Settings },
 ];
 

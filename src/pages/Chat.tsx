@@ -20,7 +20,12 @@ import {
   AlertCircle,
   Loader2,
   Trash2,
-  Upload,
+  Image,
+  Pencil,
+  Check,
+  X,
+  Archive,
+  MoreVertical,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -34,6 +39,13 @@ import {
   Mensagem 
 } from "@/lib/database";
 import { registrarLog } from "@/lib/logging";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface ChatSource {
   id?: string;
@@ -51,6 +63,7 @@ interface ChatMessage {
   timestamp: Date;
   sources?: ChatSource[];
   hasContext?: boolean;
+  imageUrl?: string;
 }
 
 // Função para obter data/hora atual de Brasília
@@ -97,33 +110,19 @@ const suggestedPrompts = [
 
 // Função para formatar a resposta do assistente com markdown
 const formatAssistantMessage = (content: string) => {
-  // Converter markdown básico para formatação visual
   let formatted = content;
   
-  // Negrito: **texto** ou __texto__
   formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
   formatted = formatted.replace(/__(.*?)__/g, '<strong>$1</strong>');
-  
-  // Itálico: *texto* ou _texto_
   formatted = formatted.replace(/\*([^*]+)\*/g, '<em>$1</em>');
   formatted = formatted.replace(/_([^_]+)_/g, '<em>$1</em>');
-  
-  // Listas com marcadores
   formatted = formatted.replace(/^[-•] (.+)$/gm, '<li>$1</li>');
   formatted = formatted.replace(/(<li>.*<\/li>\n?)+/g, '<ul class="list-disc ml-4 my-2">$&</ul>');
-  
-  // Listas numeradas
   formatted = formatted.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-  
-  // Quebras de linha duplas para parágrafos
   formatted = formatted.replace(/\n\n/g, '</p><p class="mt-2">');
-  
-  // Headers
   formatted = formatted.replace(/^### (.+)$/gm, '<h4 class="font-semibold mt-3 mb-1">$1</h4>');
   formatted = formatted.replace(/^## (.+)$/gm, '<h3 class="font-bold mt-4 mb-2">$1</h3>');
   formatted = formatted.replace(/^# (.+)$/gm, '<h2 class="font-bold text-lg mt-4 mb-2">$1</h2>');
-  
-  // Código inline
   formatted = formatted.replace(/`([^`]+)`/g, '<code class="bg-muted px-1 rounded text-sm">$1</code>');
   
   return formatted;
@@ -137,8 +136,11 @@ export default function Chat() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingConversas, setLoadingConversas] = useState(true);
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [editingTitle, setEditingTitle] = useState<string | null>(null);
+  const [newTitle, setNewTitle] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const scrollToBottom = () => {
@@ -155,8 +157,14 @@ export default function Chat() {
 
   const loadConversas = async () => {
     try {
-      const data = await getConversas();
-      setConversas(data);
+      const { data } = await supabase
+        .from('conversas')
+        .select('*')
+        .eq('arquivado', false)
+        .is('excluido_em', null)
+        .order('updated_at', { ascending: false });
+      
+      setConversas(data || []);
     } catch (error) {
       console.error("Erro ao carregar conversas:", error);
     } finally {
@@ -203,11 +211,87 @@ export default function Chat() {
     }
   };
 
+  const handleRenameConversa = async (conversaId: string) => {
+    if (!newTitle.trim()) return;
+    
+    try {
+      await supabase
+        .from('conversas')
+        .update({ titulo: newTitle.trim() })
+        .eq('id', conversaId);
+      
+      setConversas(prev => prev.map(c => 
+        c.id === conversaId ? { ...c, titulo: newTitle.trim() } : c
+      ));
+      
+      setEditingTitle(null);
+      setNewTitle("");
+      
+      toast({
+        title: "Conversa renomeada",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro ao renomear conversa",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleArchiveConversa = async (conversaId: string) => {
+    try {
+      await supabase
+        .from('conversas')
+        .update({ arquivado: true })
+        .eq('id', conversaId);
+      
+      if (conversaAtual === conversaId) {
+        setConversaAtual(null);
+        setMessages([]);
+      }
+      
+      await loadConversas();
+      
+      toast({
+        title: "Conversa arquivada",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro ao arquivar conversa",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteConversa = async (conversaId: string) => {
+    try {
+      await supabase
+        .from('conversas')
+        .update({ excluido_em: new Date().toISOString() })
+        .eq('id', conversaId);
+      
+      if (conversaAtual === conversaId) {
+        setConversaAtual(null);
+        setMessages([]);
+      }
+      
+      await loadConversas();
+      
+      toast({
+        title: "Conversa movida para lixeira",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro ao excluir conversa",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Verificar tipo de arquivo
     const allowedTypes = ['application/pdf', 'text/plain', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
     if (!allowedTypes.includes(file.type)) {
       toast({
@@ -221,7 +305,6 @@ export default function Chat() {
     setUploadingFile(true);
 
     try {
-      // Criar uma mensagem indicando o upload
       const userMessage: ChatMessage = {
         id: Date.now().toString(),
         role: "user",
@@ -230,12 +313,10 @@ export default function Chat() {
       };
       setMessages(prev => [...prev, userMessage]);
 
-      // Para arquivos de texto, ler o conteúdo
       if (file.type === 'text/plain') {
         const text = await file.text();
         setInput(`Analise o seguinte documento "${file.name}":\n\n${text.substring(0, 5000)}${text.length > 5000 ? '...(texto truncado)' : ''}`);
       } else {
-        // Para outros tipos, informar que foi anexado
         setInput(`Recebi o arquivo "${file.name}". Por favor, descreva o que você gostaria que eu fizesse com este documento.`);
       }
 
@@ -251,9 +332,63 @@ export default function Chat() {
       });
     } finally {
       setUploadingFile(false);
-      // Limpar o input de arquivo
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: "Tipo de arquivo não suportado",
+        description: "Envie apenas imagens (JPG, PNG, GIF, etc.)",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setUploadingFile(true);
+
+    try {
+      // Converter imagem para base64 para exibir no chat
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const imageUrl = e.target?.result as string;
+        
+        const userMessage: ChatMessage = {
+          id: Date.now().toString(),
+          role: "user",
+          content: `📷 Imagem enviada: ${file.name}`,
+          timestamp: new Date(),
+          imageUrl,
+        };
+        setMessages(prev => [...prev, userMessage]);
+        
+        setInput(`Analise esta imagem "${file.name}" e descreva o que você vê. Se for um documento jurídico, extraia as informações relevantes.`);
+        
+        toast({
+          title: "Imagem anexada",
+          description: `${file.name} foi adicionada à conversa`,
+        });
+        
+        setUploadingFile(false);
+      };
+      
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error("Erro ao processar imagem:", error);
+      toast({
+        title: "Erro ao processar imagem",
+        variant: "destructive",
+      });
+      setUploadingFile(false);
+    } finally {
+      if (imageInputRef.current) {
+        imageInputRef.current.value = "";
       }
     }
   };
@@ -264,7 +399,6 @@ export default function Chat() {
     const inicio = Date.now();
     const dataHoraAtual = getDataHoraBrasilia();
 
-    // Se não há conversa selecionada, criar uma nova
     let currentConversaId = conversaAtual;
     if (!currentConversaId) {
       try {
@@ -302,10 +436,8 @@ export default function Chat() {
     setIsLoading(true);
 
     try {
-      // Salvar mensagem do usuário no banco
       await addMensagem(currentConversaId, "user", input);
 
-      // Chamar a edge function de chat com contexto de data/hora
       const { data, error } = await supabase.functions.invoke('chat-ai', {
         body: {
           messages: [...messages, userMessage].filter(m => m.id !== "welcome").map(m => ({
@@ -335,10 +467,8 @@ export default function Chat() {
 
       setMessages((prev) => [...prev, assistantMessage]);
       
-      // Salvar resposta no banco com fontes
       await addMensagem(currentConversaId, "assistant", assistantContent, fontes.length > 0 ? fontes : null);
       
-      // Registrar log de interação
       await registrarLog({
         tipo: 'chat',
         acao: 'enviar',
@@ -351,7 +481,6 @@ export default function Chat() {
         duracao_ms: Date.now() - inicio,
       });
       
-      // Atualizar lista de conversas
       await loadConversas();
 
     } catch (error) {
@@ -413,26 +542,97 @@ export default function Chat() {
               </div>
             ) : (
               conversas.map((conv) => (
-                <button
+                <div
                   key={conv.id}
-                  onClick={() => handleSelectConversa(conv)}
                   className={cn(
-                    "w-full rounded-lg p-3 text-left transition-colors hover:bg-muted",
+                    "w-full rounded-lg p-3 transition-colors hover:bg-muted group",
                     conversaAtual === conv.id && "bg-muted"
                   )}
                 >
-                  <div className="flex items-center gap-2">
-                    <MessageSquare className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                    <span className="text-sm font-medium truncate">
-                      {conv.titulo}
-                    </span>
-                  </div>
-                  {conv.ultima_mensagem && (
-                    <p className="mt-1 text-xs text-muted-foreground truncate">
-                      {conv.ultima_mensagem}
-                    </p>
+                  {editingTitle === conv.id ? (
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={newTitle}
+                        onChange={(e) => setNewTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleRenameConversa(conv.id);
+                          if (e.key === 'Escape') setEditingTitle(null);
+                        }}
+                        className="h-7 text-sm"
+                        autoFocus
+                      />
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6"
+                        onClick={() => handleRenameConversa(conv.id)}
+                      >
+                        <Check className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6"
+                        onClick={() => setEditingTitle(null)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between">
+                      <button
+                        onClick={() => handleSelectConversa(conv)}
+                        className="flex-1 text-left"
+                      >
+                        <div className="flex items-center gap-2">
+                          <MessageSquare className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                          <span className="text-sm font-medium truncate">
+                            {conv.titulo}
+                          </span>
+                        </div>
+                        {conv.ultima_mensagem && (
+                          <p className="mt-1 text-xs text-muted-foreground truncate">
+                            {conv.ultima_mensagem}
+                          </p>
+                        )}
+                      </button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                          >
+                            <MoreVertical className="h-3 w-3" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => {
+                              setEditingTitle(conv.id);
+                              setNewTitle(conv.titulo);
+                            }}
+                          >
+                            <Pencil className="mr-2 h-3 w-3" />
+                            Renomear
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleArchiveConversa(conv.id)}>
+                            <Archive className="mr-2 h-3 w-3" />
+                            Arquivar
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={() => handleDeleteConversa(conv.id)}
+                          >
+                            <Trash2 className="mr-2 h-3 w-3" />
+                            Excluir
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   )}
-                </button>
+                </div>
               ))
             )}
           </ScrollArea>
@@ -491,6 +691,13 @@ export default function Chat() {
                       message.role === "user" && "text-right"
                     )}
                   >
+                    {message.imageUrl && (
+                      <img 
+                        src={message.imageUrl} 
+                        alt="Imagem enviada" 
+                        className="max-w-full rounded-lg max-h-64 object-contain"
+                      />
+                    )}
                     <div
                       className={cn(
                         "rounded-2xl px-4 py-3",
@@ -591,6 +798,26 @@ export default function Chat() {
                 className="hidden"
                 accept=".pdf,.txt,.doc,.docx"
               />
+              <input
+                type="file"
+                ref={imageInputRef}
+                onChange={handleImageUpload}
+                className="hidden"
+                accept="image/*"
+              />
+              <Button 
+                variant="ghost" 
+                size="icon"
+                onClick={() => imageInputRef.current?.click()}
+                disabled={uploadingFile}
+                title="Enviar imagem"
+              >
+                {uploadingFile ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                ) : (
+                  <Image className="h-5 w-5 text-muted-foreground" />
+                )}
+              </Button>
               <Button 
                 variant="ghost" 
                 size="icon"
@@ -598,11 +825,7 @@ export default function Chat() {
                 disabled={uploadingFile}
                 title="Anexar arquivo (PDF, TXT, DOC)"
               >
-                {uploadingFile ? (
-                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                ) : (
-                  <Paperclip className="h-5 w-5 text-muted-foreground" />
-                )}
+                <Paperclip className="h-5 w-5 text-muted-foreground" />
               </Button>
               <Input
                 placeholder="Digite sua mensagem..."

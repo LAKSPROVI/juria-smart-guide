@@ -16,9 +16,11 @@ export type Database = {
     Tables: {
       cadernos: {
         Row: {
+          arquivado: boolean | null
           created_at: string
           data: string
           erro_mensagem: string | null
+          excluido_em: string | null
           id: string
           processado_rag: boolean | null
           status: string
@@ -30,9 +32,11 @@ export type Database = {
           url_arquivo: string | null
         }
         Insert: {
+          arquivado?: boolean | null
           created_at?: string
           data: string
           erro_mensagem?: string | null
+          excluido_em?: string | null
           id?: string
           processado_rag?: boolean | null
           status?: string
@@ -44,9 +48,11 @@ export type Database = {
           url_arquivo?: string | null
         }
         Update: {
+          arquivado?: boolean | null
           created_at?: string
           data?: string
           erro_mensagem?: string | null
+          excluido_em?: string | null
           id?: string
           processado_rag?: boolean | null
           status?: string
@@ -61,8 +67,10 @@ export type Database = {
       }
       config_cadernos: {
         Row: {
+          arquivado: boolean | null
           ativo: boolean | null
           created_at: string
+          excluido_em: string | null
           horarios: string[] | null
           id: string
           processar_automaticamente: boolean | null
@@ -71,8 +79,10 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          arquivado?: boolean | null
           ativo?: boolean | null
           created_at?: string
+          excluido_em?: string | null
           horarios?: string[] | null
           id?: string
           processar_automaticamente?: boolean | null
@@ -81,8 +91,10 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          arquivado?: boolean | null
           ativo?: boolean | null
           created_at?: string
+          excluido_em?: string | null
           horarios?: string[] | null
           id?: string
           processar_automaticamente?: boolean | null
@@ -130,10 +142,12 @@ export type Database = {
       }
       consultas: {
         Row: {
+          arquivado: boolean | null
           ativo: boolean | null
           created_at: string
           data_final: string | null
           data_inicial: string | null
+          excluido_em: string | null
           horarios: string[] | null
           id: string
           nome: string
@@ -147,10 +161,12 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          arquivado?: boolean | null
           ativo?: boolean | null
           created_at?: string
           data_final?: string | null
           data_inicial?: string | null
+          excluido_em?: string | null
           horarios?: string[] | null
           id?: string
           nome: string
@@ -164,10 +180,12 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          arquivado?: boolean | null
           ativo?: boolean | null
           created_at?: string
           data_final?: string | null
           data_inicial?: string | null
+          excluido_em?: string | null
           horarios?: string[] | null
           id?: string
           nome?: string
@@ -184,21 +202,27 @@ export type Database = {
       }
       conversas: {
         Row: {
+          arquivado: boolean | null
           created_at: string
+          excluido_em: string | null
           id: string
           titulo: string
           ultima_mensagem: string | null
           updated_at: string
         }
         Insert: {
+          arquivado?: boolean | null
           created_at?: string
+          excluido_em?: string | null
           id?: string
           titulo: string
           ultima_mensagem?: string | null
           updated_at?: string
         }
         Update: {
+          arquivado?: boolean | null
           created_at?: string
+          excluido_em?: string | null
           id?: string
           titulo?: string
           ultima_mensagem?: string | null
@@ -280,11 +304,13 @@ export type Database = {
       }
       documentos: {
         Row: {
+          arquivado: boolean | null
           caderno_id: string | null
           conteudo_texto: string | null
           created_at: string
           embedding_processado: boolean | null
           erro_mensagem: string | null
+          excluido_em: string | null
           id: string
           nome: string
           origem: string
@@ -297,11 +323,13 @@ export type Database = {
           url_arquivo: string | null
         }
         Insert: {
+          arquivado?: boolean | null
           caderno_id?: string | null
           conteudo_texto?: string | null
           created_at?: string
           embedding_processado?: boolean | null
           erro_mensagem?: string | null
+          excluido_em?: string | null
           id?: string
           nome: string
           origem?: string
@@ -314,11 +342,13 @@ export type Database = {
           url_arquivo?: string | null
         }
         Update: {
+          arquivado?: boolean | null
           caderno_id?: string | null
           conteudo_texto?: string | null
           created_at?: string
           embedding_processado?: boolean | null
           erro_mensagem?: string | null
+          excluido_em?: string | null
           id?: string
           nome?: string
           origem?: string
@@ -514,12 +544,14 @@ export type Database = {
       }
       resultados_consultas: {
         Row: {
+          arquivado: boolean | null
           consulta_id: string | null
           created_at: string
           dados_completos: Json | null
           data_disponibilizacao: string | null
           data_publicacao: string | null
           destinatarios: Json | null
+          excluido_em: string | null
           id: string
           nome_orgao: string | null
           numero_processo: string | null
@@ -529,12 +561,14 @@ export type Database = {
           visualizado: boolean | null
         }
         Insert: {
+          arquivado?: boolean | null
           consulta_id?: string | null
           created_at?: string
           dados_completos?: Json | null
           data_disponibilizacao?: string | null
           data_publicacao?: string | null
           destinatarios?: Json | null
+          excluido_em?: string | null
           id?: string
           nome_orgao?: string | null
           numero_processo?: string | null
@@ -544,12 +578,14 @@ export type Database = {
           visualizado?: boolean | null
         }
         Update: {
+          arquivado?: boolean | null
           consulta_id?: string | null
           created_at?: string
           dados_completos?: Json | null
           data_disponibilizacao?: string | null
           data_publicacao?: string | null
           destinatarios?: Json | null
+          excluido_em?: string | null
           id?: string
           nome_orgao?: string | null
           numero_processo?: string | null
