@@ -18,44 +18,28 @@ import {
   Search,
   Calendar,
   AlertCircle,
+  Loader2,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import { 
+  getConversas, 
+  createConversa, 
+  getMensagens, 
+  addMensagem,
+  Conversa,
+  Mensagem 
+} from "@/lib/database";
 
-interface Message {
+interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
   sources?: { title: string; processo: string }[];
 }
-
-interface Conversation {
-  id: string;
-  title: string;
-  lastMessage: string;
-  date: Date;
-}
-
-const conversations: Conversation[] = [
-  {
-    id: "1",
-    title: "Análise de intimações do dia",
-    lastMessage: "Encontrei 15 novas intimações para os clientes...",
-    date: new Date(),
-  },
-  {
-    id: "2",
-    title: "Prazos da semana",
-    lastMessage: "Os prazos processuais identificados são...",
-    date: new Date(Date.now() - 86400000),
-  },
-  {
-    id: "3",
-    title: "Processo 1234567-89",
-    lastMessage: "O último andamento registrado foi...",
-    date: new Date(Date.now() - 172800000),
-  },
-];
 
 const suggestedPrompts = [
   {
@@ -81,31 +65,99 @@ const suggestedPrompts = [
 ];
 
 export default function Chat() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      role: "assistant",
-      content:
-        "Olá! Sou seu assistente jurídico com acesso ao sistema RAG. Posso ajudar a analisar intimações, extrair prazos, comparar decisões e muito mais. Como posso ajudar?",
-      timestamp: new Date(),
-    },
-  ]);
+  const [conversas, setConversas] = useState<Conversa[]>([]);
+  const [conversaAtual, setConversaAtual] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingConversas, setLoadingConversas] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { toast } = useToast();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   useEffect(() => {
+    loadConversas();
+  }, []);
+
+  useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
-  const handleSend = () => {
+  const loadConversas = async () => {
+    try {
+      const data = await getConversas();
+      setConversas(data);
+    } catch (error) {
+      console.error("Erro ao carregar conversas:", error);
+    } finally {
+      setLoadingConversas(false);
+    }
+  };
+
+  const loadMensagens = async (conversaId: string) => {
+    try {
+      const data = await getMensagens(conversaId);
+      setMessages(data.map(m => ({
+        id: m.id,
+        role: m.role as "user" | "assistant",
+        content: m.content,
+        timestamp: new Date(m.created_at),
+        sources: m.fontes as ChatMessage["sources"],
+      })));
+    } catch (error) {
+      console.error("Erro ao carregar mensagens:", error);
+    }
+  };
+
+  const handleSelectConversa = async (conversa: Conversa) => {
+    setConversaAtual(conversa.id);
+    await loadMensagens(conversa.id);
+  };
+
+  const handleNovaConversa = async () => {
+    try {
+      const conversa = await createConversa("Nova conversa");
+      setConversas(prev => [conversa, ...prev]);
+      setConversaAtual(conversa.id);
+      setMessages([{
+        id: "welcome",
+        role: "assistant",
+        content: "Olá! Sou seu assistente jurídico com acesso ao sistema RAG. Posso ajudar a analisar intimações, extrair prazos, comparar decisões e muito mais. Como posso ajudar?",
+        timestamp: new Date(),
+      }]);
+    } catch (error) {
+      toast({
+        title: "Erro ao criar conversa",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleSend = async () => {
     if (!input.trim() || isLoading) return;
 
-    const userMessage: Message = {
+    // Se não há conversa selecionada, criar uma nova
+    let currentConversaId = conversaAtual;
+    if (!currentConversaId) {
+      try {
+        const titulo = input.substring(0, 50) + (input.length > 50 ? "..." : "");
+        const conversa = await createConversa(titulo);
+        setConversas(prev => [conversa, ...prev]);
+        currentConversaId = conversa.id;
+        setConversaAtual(conversa.id);
+      } catch (error) {
+        toast({
+          title: "Erro ao criar conversa",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    const userMessage: ChatMessage = {
       id: Date.now().toString(),
       role: "user",
       content: input,
@@ -116,27 +168,66 @@ export default function Chat() {
     setInput("");
     setIsLoading(true);
 
-    // Simulate AI response
-    setTimeout(() => {
-      const assistantMessage: Message = {
+    try {
+      // Salvar mensagem do usuário no banco
+      await addMensagem(currentConversaId, "user", input);
+
+      // Chamar a edge function de chat
+      const { data, error } = await supabase.functions.invoke('chat-ai', {
+        body: {
+          messages: [...messages, userMessage].filter(m => m.id !== "welcome").map(m => ({
+            role: m.role,
+            content: m.content,
+          })),
+        },
+      });
+
+      if (error) throw error;
+
+      const assistantContent = data.success 
+        ? data.message 
+        : "Desculpe, ocorreu um erro ao processar sua solicitação.";
+
+      const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content:
-          "Analisei os documentos disponíveis no sistema RAG. Com base nas publicações dos últimos dias, encontrei informações relevantes sobre sua consulta. Os dados mostram que há 3 novas intimações relacionadas aos processos monitorados, sendo que uma delas possui prazo de 15 dias corridos para manifestação.",
+        content: assistantContent,
         timestamp: new Date(),
-        sources: [
-          { title: "DJE TJSP 25/12/2025", processo: "1234567-89.2024.8.26.0100" },
-          { title: "DJE TJSP 24/12/2025", processo: "9876543-21.2024.8.26.0050" },
-        ],
       };
+
       setMessages((prev) => [...prev, assistantMessage]);
+      
+      // Salvar resposta no banco
+      await addMensagem(currentConversaId, "assistant", assistantContent);
+      
+      // Atualizar lista de conversas
+      await loadConversas();
+
+    } catch (error) {
+      console.error("Erro ao enviar mensagem:", error);
+      toast({
+        title: "Erro ao enviar mensagem",
+        description: error instanceof Error ? error.message : "Erro desconhecido",
+        variant: "destructive",
+      });
+      
+      const errorMessage: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   const handlePromptClick = (prompt: string) => {
     setInput(prompt);
   };
+
+  const showWelcome = messages.length === 0 || (messages.length === 1 && messages[0].id === "welcome");
 
   return (
     <AppLayout title="Chat IA" subtitle="Converse com o assistente jurídico inteligente">
@@ -144,31 +235,44 @@ export default function Chat() {
         {/* Sidebar */}
         <div className="w-72 flex-shrink-0 rounded-xl border border-border bg-card shadow-card">
           <div className="p-4 border-b border-border">
-            <Button className="w-full justify-start gap-2">
+            <Button className="w-full justify-start gap-2" onClick={handleNovaConversa}>
               <Plus className="h-4 w-4" />
               Nova Conversa
             </Button>
           </div>
           <ScrollArea className="h-[calc(100%-5rem)] p-2">
-            {conversations.map((conv) => (
-              <button
-                key={conv.id}
-                className={cn(
-                  "w-full rounded-lg p-3 text-left transition-colors hover:bg-muted",
-                  conv.id === "1" && "bg-muted"
-                )}
-              >
-                <div className="flex items-center gap-2">
-                  <MessageSquare className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                  <span className="text-sm font-medium truncate">
-                    {conv.title}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground truncate">
-                  {conv.lastMessage}
-                </p>
-              </button>
-            ))}
+            {loadingConversas ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : conversas.length === 0 ? (
+              <div className="text-center py-8 text-sm text-muted-foreground">
+                Nenhuma conversa ainda
+              </div>
+            ) : (
+              conversas.map((conv) => (
+                <button
+                  key={conv.id}
+                  onClick={() => handleSelectConversa(conv)}
+                  className={cn(
+                    "w-full rounded-lg p-3 text-left transition-colors hover:bg-muted",
+                    conversaAtual === conv.id && "bg-muted"
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <MessageSquare className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <span className="text-sm font-medium truncate">
+                      {conv.titulo}
+                    </span>
+                  </div>
+                  {conv.ultima_mensagem && (
+                    <p className="mt-1 text-xs text-muted-foreground truncate">
+                      {conv.ultima_mensagem}
+                    </p>
+                  )}
+                </button>
+              ))
+            )}
           </ScrollArea>
         </div>
 
@@ -177,7 +281,23 @@ export default function Chat() {
           {/* Messages */}
           <ScrollArea className="flex-1 p-6">
             <div className="space-y-6">
-              {messages.map((message) => (
+              {showWelcome && (
+                <div className="flex gap-3">
+                  <Avatar className="h-8 w-8 flex-shrink-0">
+                    <AvatarFallback className="bg-primary/10 text-primary">
+                      <Bot className="h-4 w-4" />
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="max-w-[70%] space-y-2">
+                    <div className="rounded-2xl rounded-tl-sm bg-muted px-4 py-3">
+                      <p className="text-sm">
+                        Olá! Sou seu assistente jurídico com acesso ao sistema RAG. Posso ajudar a analisar intimações, extrair prazos, comparar decisões e muito mais. Como posso ajudar?
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {messages.filter(m => m.id !== "welcome").map((message) => (
                 <div
                   key={message.id}
                   className={cn(
@@ -214,7 +334,7 @@ export default function Chat() {
                           : "bg-primary text-primary-foreground rounded-tr-sm"
                       )}
                     >
-                      <p className="text-sm">{message.content}</p>
+                      <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                     </div>
                     {message.sources && message.sources.length > 0 && (
                       <div className="flex flex-wrap gap-2">
@@ -260,7 +380,7 @@ export default function Chat() {
           </ScrollArea>
 
           {/* Suggested Prompts */}
-          {messages.length === 1 && (
+          {showWelcome && (
             <div className="border-t border-border p-4">
               <p className="text-sm text-muted-foreground mb-3">
                 Sugestões de consulta:
@@ -290,16 +410,21 @@ export default function Chat() {
                 placeholder="Digite sua mensagem..."
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSend()}
+                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
                 className="flex-1"
+                disabled={isLoading}
               />
               <Button onClick={handleSend} disabled={!input.trim() || isLoading}>
-                <Send className="h-4 w-4" />
+                {isLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
               </Button>
             </div>
             <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
               <Sparkles className="h-3 w-3" />
-              <span>Powered by Google Gemini • RAG com 2.4k documentos</span>
+              <span>Powered by Google Gemini • Sistema RAG Jurídico</span>
             </div>
           </div>
         </div>

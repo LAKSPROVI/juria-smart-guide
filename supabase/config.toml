@@ -1,1 +1,7 @@
 project_id = "ftbkgssklyrtkqttbkyn"
+
+[functions.consulta-intimacoes]
+verify_jwt = false
+
+[functions.chat-ai]
+verify_jwt = false
