@@ -57,12 +57,12 @@ import { Switch } from "@/components/ui/switch";
 import { useNavigate } from "react-router-dom";
 import { TribunalSelector } from "@/components/TribunalSelector";
 
-// Lista de horários disponíveis para agendamento
-
+// Lista completa de horários disponíveis (todas as horas)
 const horariosDisponiveis = [
-  "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00",
-  "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00",
-  "20:00", "21:00", "22:00", "23:00",
+  "00:00", "01:00", "02:00", "03:00", "04:00", "05:00",
+  "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", 
+  "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", 
+  "18:00", "19:00", "20:00", "21:00", "22:00", "23:00",
 ];
 
 export default function Consultas() {
@@ -91,6 +91,7 @@ export default function Consultas() {
   const [formDataFim, setFormDataFim] = useState("");
   const [formRecorrencia, setFormRecorrencia] = useState("manual");
   const [formHorarios, setFormHorarios] = useState<string[]>(["09:00"]);
+  const [formModoBusca, setFormModoBusca] = useState<"diaria" | "periodo">("diaria");
 
   useEffect(() => {
     loadConsultas();
@@ -110,6 +111,15 @@ export default function Consultas() {
     } finally {
       setLoadingConsultas(false);
     }
+  };
+
+  // Verificar se já existe uma consulta similar
+  const verificarDuplicata = (tribunais: string[], termo: string, tipo: string) => {
+    return consultas.find(c => 
+      tribunais.includes(c.tribunal) && 
+      c.termo.toLowerCase() === termo.toLowerCase() &&
+      c.tipo === tipo
+    );
   };
 
   const handleExecutar = async (consulta: Consulta, forcarAtualizacao = false) => {
@@ -226,35 +236,47 @@ export default function Consultas() {
 
   const handleCriarConsulta = async () => {
     try {
-      // Se múltiplos tribunais selecionados, criar uma consulta para cada
       const tribunaisParaCriar = formTribunais.length > 0 ? formTribunais : [formTribunal];
       
-      for (const tribunal of tribunaisParaCriar) {
-        await createConsulta({
-          nome: formNome || `${formTermo} - ${tribunal}`,
-          tribunal: tribunal,
-          tipo: formTipo,
-          termo: formTermo,
-          numero_oab: formNumeroOab || undefined,
-          uf_oab: formUfOab || undefined,
-          data_inicial: formDataInicio || undefined,
-          data_final: formDataFim || undefined,
-          recorrencia: formRecorrencia,
-          horarios: formHorarios,
-          ativo: true,
+      // Verificar duplicatas
+      const duplicata = verificarDuplicata(tribunaisParaCriar, formTermo, formTipo);
+      if (duplicata) {
+        toast({
+          title: "Consulta já existe",
+          description: `Já existe uma consulta para "${formTermo}" no tribunal ${duplicata.tribunal}.`,
+          variant: "destructive",
         });
+        return;
       }
+
+      // Criar UMA única consulta com todos os tribunais no campo tribunal (separados por vírgula)
+      // Isso evita criar múltiplos eventos para a mesma busca
+      const tribunaisStr = tribunaisParaCriar.join(",");
+      
+      await createConsulta({
+        nome: formNome || `${formTermo} - ${tribunaisParaCriar.length > 1 ? `${tribunaisParaCriar.length} tribunais` : tribunaisParaCriar[0]}`,
+        tribunal: tribunaisStr,
+        tipo: formTipo,
+        termo: formTermo,
+        numero_oab: formNumeroOab || undefined,
+        uf_oab: formUfOab || undefined,
+        // Se modo busca for diária automatizada, não usar datas
+        data_inicial: formModoBusca === "diaria" ? undefined : formDataInicio || undefined,
+        data_final: formModoBusca === "diaria" ? undefined : formDataFim || undefined,
+        recorrencia: formRecorrencia,
+        horarios: formHorarios,
+        ativo: true,
+      });
 
       setOpen(false);
       await loadConsultas();
       
-      // Reset form
       resetForm();
       
       toast({
-        title: "Consulta(s) criada(s)",
+        title: "Consulta criada",
         description: tribunaisParaCriar.length > 1 
-          ? `${tribunaisParaCriar.length} consultas foram criadas com sucesso.`
+          ? `Consulta configurada para ${tribunaisParaCriar.length} tribunais.`
           : "A nova consulta foi configurada com sucesso.",
       });
     } catch (error) {
@@ -278,6 +300,7 @@ export default function Consultas() {
     setFormDataFim(consulta.data_final || "");
     setFormRecorrencia(consulta.recorrencia);
     setFormHorarios(consulta.horarios || ["09:00"]);
+    setFormModoBusca(consulta.data_inicial ? "periodo" : "diaria");
     setEditOpen(true);
   };
 
@@ -292,8 +315,8 @@ export default function Consultas() {
         termo: formTermo,
         numero_oab: formNumeroOab || undefined,
         uf_oab: formUfOab || undefined,
-        data_inicial: formDataInicio || undefined,
-        data_final: formDataFim || undefined,
+        data_inicial: formModoBusca === "diaria" ? null : formDataInicio || undefined,
+        data_final: formModoBusca === "diaria" ? null : formDataFim || undefined,
         recorrencia: formRecorrencia,
         horarios: formHorarios,
       });
@@ -328,12 +351,14 @@ export default function Consultas() {
     setFormDataFim("");
     setFormRecorrencia("manual");
     setFormHorarios(["09:00"]);
+    setFormModoBusca("diaria");
   };
 
   const formatRecorrencia = (consulta: Consulta) => {
     if (consulta.recorrencia === "manual") return "Manual";
     if (consulta.recorrencia === "diaria") {
-      return `Diária - ${consulta.horarios?.join(", ") || "09:00"}`;
+      const modoBusca = consulta.data_inicial ? "Período" : "Diária";
+      return `${modoBusca} - ${consulta.horarios?.join(", ") || "09:00"}`;
     }
     if (consulta.recorrencia === "semanal") return "Semanal";
     return consulta.recorrencia;
@@ -406,7 +431,7 @@ export default function Consultas() {
                     multiple={true}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Selecione múltiplos tribunais para criar consultas em lote
+                    Selecione múltiplos tribunais - será criada UMA consulta para todos
                   </p>
                 </div>
                 <div className="grid gap-2">
@@ -458,26 +483,46 @@ export default function Consultas() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="dataInicio">Data Inicial</Label>
-                    <Input 
-                      id="dataInicio" 
-                      type="date" 
-                      value={formDataInicio}
-                      onChange={(e) => setFormDataInicio(e.target.value)}
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="dataFim">Data Final</Label>
-                    <Input 
-                      id="dataFim" 
-                      type="date"
-                      value={formDataFim}
-                      onChange={(e) => setFormDataFim(e.target.value)}
-                    />
-                  </div>
+                <div className="grid gap-2">
+                  <Label>Modo de Busca</Label>
+                  <Select value={formModoBusca} onValueChange={(v) => setFormModoBusca(v as "diaria" | "periodo")}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="diaria">Busca Diária Automática (sempre últimos 30 dias)</SelectItem>
+                      <SelectItem value="periodo">Período Específico (escolher datas)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {formModoBusca === "diaria" 
+                      ? "A busca sempre considerará os últimos 30 dias automaticamente" 
+                      : "Defina um período específico para a consulta"}
+                  </p>
                 </div>
+
+                {formModoBusca === "periodo" && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="dataInicio">Data Inicial</Label>
+                      <Input 
+                        id="dataInicio" 
+                        type="date" 
+                        value={formDataInicio}
+                        onChange={(e) => setFormDataInicio(e.target.value)}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dataFim">Data Final</Label>
+                      <Input 
+                        id="dataFim" 
+                        type="date"
+                        value={formDataFim}
+                        onChange={(e) => setFormDataFim(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
                 
                 <div className="grid gap-2">
                   <Label>Recorrência</Label>
@@ -487,7 +532,7 @@ export default function Consultas() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="manual">Manual</SelectItem>
-                      <SelectItem value="diaria">Diária</SelectItem>
+                      <SelectItem value="diaria">Diária (Automática)</SelectItem>
                       <SelectItem value="semanal">Semanal</SelectItem>
                     </SelectContent>
                   </Select>
@@ -496,7 +541,7 @@ export default function Consultas() {
                 {formRecorrencia !== "manual" && (
                   <div className="grid gap-2">
                     <Label>Horários de Execução</Label>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border rounded-md">
                       {horariosDisponiveis.map((h) => (
                         <Badge
                           key={h}
@@ -537,7 +582,7 @@ export default function Consultas() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Nome</TableHead>
-                  <TableHead>Tribunal</TableHead>
+                  <TableHead>Tribunal(is)</TableHead>
                   <TableHead>Tipo</TableHead>
                   <TableHead>Termo</TableHead>
                   <TableHead>Recorrência</TableHead>
@@ -554,88 +599,98 @@ export default function Consultas() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredConsultas.map((consulta) => (
-                    <TableRow key={consulta.id}>
-                      <TableCell className="font-medium">{consulta.nome}</TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{consulta.tribunal}</Badge>
-                      </TableCell>
-                      <TableCell className="capitalize">{consulta.tipo.replace("_", " ")}</TableCell>
-                      <TableCell className="max-w-[200px] truncate">
-                        {consulta.termo}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                          <Clock className="h-3 w-3" />
-                          {formatRecorrencia(consulta)}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatUltimaExecucao(consulta.ultima_execucao)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Switch
-                            checked={consulta.ativo}
-                            onCheckedChange={() => handleToggleAtivo(consulta)}
-                          />
-                          {consulta.ativo ? (
-                            <Badge className="bg-success/10 text-success hover:bg-success/20">
-                              <CheckCircle className="mr-1 h-3 w-3" />
-                              Ativo
-                            </Badge>
-                          ) : (
-                            <Badge variant="secondary">
-                              <XCircle className="mr-1 h-3 w-3" />
-                              Inativo
-                            </Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleExecutar(consulta, false)}
-                            disabled={loading}
-                            title="Executar consulta (usa cache)"
-                          >
-                            {loading && consultaAtual?.id === consulta.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Play className="h-4 w-4" />
+                  filteredConsultas.map((consulta) => {
+                    const tribunais = consulta.tribunal.split(",");
+                    return (
+                      <TableRow key={consulta.id}>
+                        <TableCell className="font-medium">{consulta.nome}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1">
+                            {tribunais.slice(0, 2).map(t => (
+                              <Badge key={t} variant="secondary" className="text-xs">{t.trim()}</Badge>
+                            ))}
+                            {tribunais.length > 2 && (
+                              <Badge variant="outline" className="text-xs">+{tribunais.length - 2}</Badge>
                             )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleExecutar(consulta, true)}
-                            disabled={loading}
-                            title="Forçar atualização (ignora cache)"
-                          >
-                            <RefreshCw className="h-4 w-4" />
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            title="Editar"
-                            onClick={() => handleEditConsulta(consulta)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            onClick={() => handleDelete(consulta)}
-                            title="Excluir"
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                          </div>
+                        </TableCell>
+                        <TableCell className="capitalize">{consulta.tipo.replace("_", " ")}</TableCell>
+                        <TableCell className="max-w-[200px] truncate">
+                          {consulta.termo}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                            <Clock className="h-3 w-3" />
+                            {formatRecorrencia(consulta)}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {formatUltimaExecucao(consulta.ultima_execucao)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Switch
+                              checked={consulta.ativo}
+                              onCheckedChange={() => handleToggleAtivo(consulta)}
+                            />
+                            {consulta.ativo ? (
+                              <Badge className="bg-success/10 text-success hover:bg-success/20">
+                                <CheckCircle className="mr-1 h-3 w-3" />
+                                Ativo
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary">
+                                <XCircle className="mr-1 h-3 w-3" />
+                                Inativo
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleExecutar(consulta, false)}
+                              disabled={loading}
+                              title="Executar consulta (usa cache)"
+                            >
+                              {loading && consultaAtual?.id === consulta.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Play className="h-4 w-4" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleExecutar(consulta, true)}
+                              disabled={loading}
+                              title="Forçar atualização (ignora cache)"
+                            >
+                              <RefreshCw className="h-4 w-4" />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              title="Editar"
+                              onClick={() => handleEditConsulta(consulta)}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={() => handleDelete(consulta)}
+                              title="Excluir"
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
@@ -745,10 +800,10 @@ export default function Consultas() {
               <div className="grid gap-2">
                 <Label>Tribunal</Label>
                 <TribunalSelector
-                  value={formTribunal ? [formTribunal] : []}
-                  onChange={(vals) => setFormTribunal(vals[0] || "")}
-                  placeholder="Selecione o tribunal..."
-                  multiple={false}
+                  value={formTribunal ? formTribunal.split(",").map(t => t.trim()) : []}
+                  onChange={(vals) => setFormTribunal(vals.join(","))}
+                  placeholder="Selecione o(s) tribunal(is)..."
+                  multiple={true}
                 />
               </div>
               <div className="grid gap-2">
@@ -800,26 +855,41 @@ export default function Consultas() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="edit-dataInicio">Data Inicial</Label>
-                  <Input 
-                    id="edit-dataInicio" 
-                    type="date" 
-                    value={formDataInicio}
-                    onChange={(e) => setFormDataInicio(e.target.value)}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="edit-dataFim">Data Final</Label>
-                  <Input 
-                    id="edit-dataFim" 
-                    type="date"
-                    value={formDataFim}
-                    onChange={(e) => setFormDataFim(e.target.value)}
-                  />
-                </div>
+              <div className="grid gap-2">
+                <Label>Modo de Busca</Label>
+                <Select value={formModoBusca} onValueChange={(v) => setFormModoBusca(v as "diaria" | "periodo")}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="diaria">Busca Diária Automática (sempre últimos 30 dias)</SelectItem>
+                    <SelectItem value="periodo">Período Específico (escolher datas)</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
+
+              {formModoBusca === "periodo" && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-dataInicio">Data Inicial</Label>
+                    <Input 
+                      id="edit-dataInicio" 
+                      type="date" 
+                      value={formDataInicio}
+                      onChange={(e) => setFormDataInicio(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-dataFim">Data Final</Label>
+                    <Input 
+                      id="edit-dataFim" 
+                      type="date"
+                      value={formDataFim}
+                      onChange={(e) => setFormDataFim(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
               
               <div className="grid gap-2">
                 <Label>Recorrência</Label>
@@ -829,7 +899,7 @@ export default function Consultas() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="manual">Manual</SelectItem>
-                    <SelectItem value="diaria">Diária</SelectItem>
+                    <SelectItem value="diaria">Diária (Automática)</SelectItem>
                     <SelectItem value="semanal">Semanal</SelectItem>
                   </SelectContent>
                 </Select>
@@ -838,7 +908,7 @@ export default function Consultas() {
               {formRecorrencia !== "manual" && (
                 <div className="grid gap-2">
                   <Label>Horários de Execução</Label>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border rounded-md">
                     {horariosDisponiveis.map((h) => (
                       <Badge
                         key={h}

@@ -20,6 +20,7 @@ import {
   AlertCircle,
   Loader2,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -52,16 +53,35 @@ interface ChatMessage {
   hasContext?: boolean;
 }
 
+// Função para obter data/hora atual de Brasília
+const getDataHoraBrasilia = () => {
+  const now = new Date();
+  return now.toLocaleString("pt-BR", { 
+    timeZone: "America/Sao_Paulo",
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+};
+
+const getDataBrasilia = () => {
+  const now = new Date();
+  return now.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+};
+
 const suggestedPrompts = [
   {
     icon: Calendar,
     title: "Resumir intimações do dia",
-    prompt: "Resuma todas as intimações publicadas hoje para meus clientes",
+    prompt: `Considerando que hoje é ${getDataBrasilia()}, resuma todas as intimações publicadas hoje para meus clientes`,
   },
   {
     icon: Clock,
     title: "Extrair prazos",
-    prompt: "Identifique todos os prazos processuais nos documentos recentes",
+    prompt: `Considerando a data de hoje (${getDataBrasilia()}), identifique todos os prazos processuais nos documentos recentes`,
   },
   {
     icon: Search,
@@ -71,9 +91,43 @@ const suggestedPrompts = [
   {
     icon: AlertCircle,
     title: "Verificar urgências",
-    prompt: "Há alguma intimação urgente ou prazo próximo do vencimento?",
+    prompt: `Considerando que hoje é ${getDataBrasilia()}, há alguma intimação urgente ou prazo próximo do vencimento?`,
   },
 ];
+
+// Função para formatar a resposta do assistente com markdown
+const formatAssistantMessage = (content: string) => {
+  // Converter markdown básico para formatação visual
+  let formatted = content;
+  
+  // Negrito: **texto** ou __texto__
+  formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  formatted = formatted.replace(/__(.*?)__/g, '<strong>$1</strong>');
+  
+  // Itálico: *texto* ou _texto_
+  formatted = formatted.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  formatted = formatted.replace(/_([^_]+)_/g, '<em>$1</em>');
+  
+  // Listas com marcadores
+  formatted = formatted.replace(/^[-•] (.+)$/gm, '<li>$1</li>');
+  formatted = formatted.replace(/(<li>.*<\/li>\n?)+/g, '<ul class="list-disc ml-4 my-2">$&</ul>');
+  
+  // Listas numeradas
+  formatted = formatted.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+  
+  // Quebras de linha duplas para parágrafos
+  formatted = formatted.replace(/\n\n/g, '</p><p class="mt-2">');
+  
+  // Headers
+  formatted = formatted.replace(/^### (.+)$/gm, '<h4 class="font-semibold mt-3 mb-1">$1</h4>');
+  formatted = formatted.replace(/^## (.+)$/gm, '<h3 class="font-bold mt-4 mb-2">$1</h3>');
+  formatted = formatted.replace(/^# (.+)$/gm, '<h2 class="font-bold text-lg mt-4 mb-2">$1</h2>');
+  
+  // Código inline
+  formatted = formatted.replace(/`([^`]+)`/g, '<code class="bg-muted px-1 rounded text-sm">$1</code>');
+  
+  return formatted;
+};
 
 export default function Chat() {
   const [conversas, setConversas] = useState<Conversa[]>([]);
@@ -82,7 +136,9 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [loadingConversas, setLoadingConversas] = useState(true);
+  const [uploadingFile, setUploadingFile] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const scrollToBottom = () => {
@@ -136,7 +192,7 @@ export default function Chat() {
       setMessages([{
         id: "welcome",
         role: "assistant",
-        content: "Olá! Sou seu assistente jurídico com acesso ao sistema RAG. Posso ajudar a analisar intimações, extrair prazos, comparar decisões e muito mais. Como posso ajudar?",
+        content: `Olá! Sou seu assistente jurídico com acesso ao sistema RAG. Hoje é **${getDataHoraBrasilia()}**. Posso ajudar a analisar intimações, extrair prazos, comparar decisões e muito mais. Como posso ajudar?`,
         timestamp: new Date(),
       }]);
     } catch (error) {
@@ -147,10 +203,66 @@ export default function Chat() {
     }
   };
 
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Verificar tipo de arquivo
+    const allowedTypes = ['application/pdf', 'text/plain', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    if (!allowedTypes.includes(file.type)) {
+      toast({
+        title: "Tipo de arquivo não suportado",
+        description: "Envie arquivos PDF, TXT ou DOC/DOCX",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setUploadingFile(true);
+
+    try {
+      // Criar uma mensagem indicando o upload
+      const userMessage: ChatMessage = {
+        id: Date.now().toString(),
+        role: "user",
+        content: `📎 Arquivo anexado: ${file.name}`,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, userMessage]);
+
+      // Para arquivos de texto, ler o conteúdo
+      if (file.type === 'text/plain') {
+        const text = await file.text();
+        setInput(`Analise o seguinte documento "${file.name}":\n\n${text.substring(0, 5000)}${text.length > 5000 ? '...(texto truncado)' : ''}`);
+      } else {
+        // Para outros tipos, informar que foi anexado
+        setInput(`Recebi o arquivo "${file.name}". Por favor, descreva o que você gostaria que eu fizesse com este documento.`);
+      }
+
+      toast({
+        title: "Arquivo anexado",
+        description: `${file.name} foi adicionado à conversa`,
+      });
+    } catch (error) {
+      console.error("Erro ao processar arquivo:", error);
+      toast({
+        title: "Erro ao processar arquivo",
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingFile(false);
+      // Limpar o input de arquivo
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
 
     const inicio = Date.now();
+    const dataHoraAtual = getDataHoraBrasilia();
 
     // Se não há conversa selecionada, criar uma nova
     let currentConversaId = conversaAtual;
@@ -193,13 +305,14 @@ export default function Chat() {
       // Salvar mensagem do usuário no banco
       await addMensagem(currentConversaId, "user", input);
 
-      // Chamar a edge function de chat
+      // Chamar a edge function de chat com contexto de data/hora
       const { data, error } = await supabase.functions.invoke('chat-ai', {
         body: {
           messages: [...messages, userMessage].filter(m => m.id !== "welcome").map(m => ({
             role: m.role,
             content: m.content,
           })),
+          context: `INFORMAÇÃO IMPORTANTE: A data e hora atual (horário de Brasília) é: ${dataHoraAtual}. Use essa informação para responder perguntas sobre prazos, urgências e datas.`,
         },
       });
 
@@ -339,9 +452,12 @@ export default function Chat() {
                   </Avatar>
                   <div className="max-w-[70%] space-y-2">
                     <div className="rounded-2xl rounded-tl-sm bg-muted px-4 py-3">
-                      <p className="text-sm">
-                        Olá! Sou seu assistente jurídico com acesso ao sistema RAG. Posso ajudar a analisar intimações, extrair prazos, comparar decisões e muito mais. Como posso ajudar?
-                      </p>
+                      <p 
+                        className="text-sm"
+                        dangerouslySetInnerHTML={{ 
+                          __html: formatAssistantMessage(`Olá! Sou seu assistente jurídico com acesso ao sistema RAG. Hoje é **${getDataHoraBrasilia()}**. Posso ajudar a analisar intimações, extrair prazos, comparar decisões e muito mais. Como posso ajudar?`)
+                        }}
+                      />
                     </div>
                   </div>
                 </div>
@@ -383,7 +499,16 @@ export default function Chat() {
                           : "bg-primary text-primary-foreground rounded-tr-sm"
                       )}
                     >
-                      <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                      {message.role === "assistant" ? (
+                        <div 
+                          className="text-sm prose prose-sm max-w-none dark:prose-invert"
+                          dangerouslySetInnerHTML={{ 
+                            __html: formatAssistantMessage(message.content)
+                          }}
+                        />
+                      ) : (
+                        <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                      )}
                     </div>
                     {message.sources && message.sources.length > 0 && (
                       <div className="flex flex-wrap gap-2 mt-2">
@@ -459,8 +584,25 @@ export default function Chat() {
           {/* Input */}
           <div className="border-t border-border p-4">
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="icon">
-                <Paperclip className="h-5 w-5 text-muted-foreground" />
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                className="hidden"
+                accept=".pdf,.txt,.doc,.docx"
+              />
+              <Button 
+                variant="ghost" 
+                size="icon"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingFile}
+                title="Anexar arquivo (PDF, TXT, DOC)"
+              >
+                {uploadingFile ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                ) : (
+                  <Paperclip className="h-5 w-5 text-muted-foreground" />
+                )}
               </Button>
               <Input
                 placeholder="Digite sua mensagem..."
@@ -478,9 +620,15 @@ export default function Chat() {
                 )}
               </Button>
             </div>
-            <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-              <Sparkles className="h-3 w-3" />
-              <span>Powered by Google Gemini • Sistema RAG Jurídico</span>
+            <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-3 w-3" />
+                <span>Powered by Google Gemini • Sistema RAG Jurídico</span>
+              </div>
+              <span className="flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {getDataBrasilia()}
+              </span>
             </div>
           </div>
         </div>

@@ -46,9 +46,12 @@ import {
 import { TribunalSelector, tribunaisDisponiveis as tribunaisLista } from "@/components/TribunalSelector";
 import { baixarCadernoDJE, getCadernosEmProcessamento } from "@/lib/cadernos-api";
 
+// Lista completa de horários (todas as horas)
 const horariosDisponiveis = [
-  "18:00", "18:30", "19:00", "19:30", "20:00", "20:30", 
-  "21:00", "21:30", "22:00", "22:30", "23:00",
+  "00:00", "01:00", "02:00", "03:00", "04:00", "05:00",
+  "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", 
+  "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", 
+  "18:00", "19:00", "20:00", "21:00", "22:00", "23:00",
 ];
 
 const statusConfig = {
@@ -91,10 +94,12 @@ export default function Cadernos() {
   const [newTipos, setNewTipos] = useState<string[]>(["D"]);
 
   // Form state for download
-  const [downloadTribunal, setDownloadTribunal] = useState("");
-  const [downloadData, setDownloadData] = useState("");
+  const [downloadTribunais, setDownloadTribunais] = useState<string[]>([]);
+  const [downloadDataInicio, setDownloadDataInicio] = useState("");
+  const [downloadDataFim, setDownloadDataFim] = useState("");
   const [downloadTipo, setDownloadTipo] = useState("D");
   const [downloadProcessar, setDownloadProcessar] = useState(true);
+  const [downloadModo, setDownloadModo] = useState<"unico" | "periodo">("unico");
 
   useEffect(() => {
     loadData();
@@ -161,20 +166,37 @@ export default function Cadernos() {
     }
   };
 
+  // Verificar se configuração já existe
+  const verificarDuplicataConfig = (tribunais: string[]) => {
+    return configs.find(c => tribunais.includes(c.tribunal));
+  };
+
   const handleAddConfig = async () => {
     if (newTribunais.length === 0) return;
     
+    // Verificar duplicatas
+    const duplicata = verificarDuplicataConfig(newTribunais);
+    if (duplicata) {
+      toast({
+        title: "Configuração já existe",
+        description: `O tribunal ${duplicata.tribunal} já está configurado.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    
     try {
-      // Criar configuração para cada tribunal selecionado
-      for (const tribunal of newTribunais) {
-        await createConfigCaderno({
-          tribunal: tribunal,
-          ativo: true,
-          horarios: newHorarios,
-          tipos: newTipos,
-          processar_automaticamente: true,
-        });
-      }
+      // Criar UMA única configuração com todos os tribunais
+      const tribunaisStr = newTribunais.join(",");
+      
+      await createConfigCaderno({
+        tribunal: tribunaisStr,
+        ativo: true,
+        horarios: newHorarios,
+        tipos: newTipos,
+        processar_automaticamente: true,
+      });
+
       setConfigOpen(false);
       setNewTribunais([]);
       setNewHorarios(["19:00"]);
@@ -194,11 +216,25 @@ export default function Cadernos() {
     }
   };
 
+  // Gerar lista de datas entre início e fim
+  const gerarListaDatas = (dataInicio: string, dataFim: string): string[] => {
+    const datas: string[] = [];
+    const inicio = new Date(dataInicio);
+    const fim = new Date(dataFim);
+    
+    while (inicio <= fim) {
+      datas.push(inicio.toISOString().split('T')[0]);
+      inicio.setDate(inicio.getDate() + 1);
+    }
+    
+    return datas;
+  };
+
   const handleDownload = async () => {
-    if (!downloadTribunal || !downloadData) {
+    if (downloadTribunais.length === 0 || !downloadDataInicio) {
       toast({
         title: "Dados incompletos",
-        description: "Selecione o tribunal e a data.",
+        description: "Selecione ao menos um tribunal e a data.",
         variant: "destructive",
       });
       return;
@@ -207,47 +243,73 @@ export default function Cadernos() {
     setDownloading(true);
     setDownloadOpen(false);
     
+    // Se for período, gerar lista de datas
+    const datas = downloadModo === "periodo" && downloadDataFim
+      ? gerarListaDatas(downloadDataInicio, downloadDataFim)
+      : [downloadDataInicio];
+    
+    const totalDownloads = downloadTribunais.length * datas.length;
+    
     toast({
-      title: "Download iniciado",
-      description: `Baixando caderno ${downloadTribunal} de ${downloadData}...`,
+      title: "Downloads iniciados",
+      description: `Baixando ${totalDownloads} caderno(s) de ${downloadTribunais.length} tribunal(is)...`,
     });
     
+    let sucessos = 0;
+    let erros = 0;
+    
     try {
-      const result = await baixarCadernoDJE({
-        tribunal: downloadTribunal,
-        data: downloadData,
-        tipo: downloadTipo,
-        processarRag: downloadProcessar,
-      });
+      // Fazer downloads em paralelo (limitado a 3 por vez)
+      const downloadPromises: Promise<void>[] = [];
       
-      if (result.success) {
-        toast({
-          title: "Caderno baixado com sucesso!",
-          description: result.message,
-        });
-      } else {
-        toast({
-          title: "Erro ao baixar caderno",
-          description: result.error,
-          variant: "destructive",
-        });
+      for (const tribunal of downloadTribunais) {
+        for (const data of datas) {
+          downloadPromises.push(
+            baixarCadernoDJE({
+              tribunal,
+              data,
+              tipo: downloadTipo,
+              processarRag: downloadProcessar,
+            }).then(result => {
+              if (result.success) {
+                sucessos++;
+              } else {
+                erros++;
+                console.error(`Erro ao baixar ${tribunal} - ${data}:`, result.error);
+              }
+            }).catch(err => {
+              erros++;
+              console.error(`Erro ao baixar ${tribunal} - ${data}:`, err);
+            })
+          );
+        }
       }
+      
+      await Promise.all(downloadPromises);
+      
+      toast({
+        title: "Downloads concluídos",
+        description: `${sucessos} sucesso(s), ${erros} erro(s)`,
+        variant: erros > 0 ? "destructive" : "default",
+      });
       
       // Recarregar dados
       await loadData();
       await loadCadernosProcessando();
       
     } catch (error) {
-      console.error("Erro ao baixar caderno:", error);
+      console.error("Erro ao baixar cadernos:", error);
       toast({
-        title: "Erro ao baixar caderno",
+        title: "Erro ao baixar cadernos",
         description: error instanceof Error ? error.message : "Erro desconhecido",
         variant: "destructive",
       });
     } finally {
       setDownloading(false);
-      setDownloadTribunal("");
-      setDownloadData("");
+      setDownloadTribunais([]);
+      setDownloadDataInicio("");
+      setDownloadDataFim("");
+      setDownloadModo("unico");
     }
   };
 
@@ -271,7 +333,7 @@ export default function Cadernos() {
 
   const tribunaisNaoConfigurados = tribunaisLista
     .map(t => t.value)
-    .filter(t => !configs.find(c => c.tribunal === t));
+    .filter(t => !configs.find(c => c.tribunal.split(",").includes(t)));
 
   if (loading) {
     return (
@@ -294,52 +356,67 @@ export default function Cadernos() {
       <div className="space-y-6 animate-fade-in">
         {/* Config Cards */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {configs.map((config) => (
-            <Card key={config.id} className="shadow-card">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg">{config.tribunal}</CardTitle>
-                  <Switch 
-                    checked={config.ativo} 
-                    onCheckedChange={() => handleToggleAtivo(config)}
-                  />
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3 text-sm">
-                  <div>
-                    <span className="text-muted-foreground">Horários:</span>
+          {configs.map((config) => {
+            const tribunais = config.tribunal.split(",");
+            return (
+              <Card key={config.id} className="shadow-card">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg">
+                      {tribunais.length > 1 ? `${tribunais.length} Tribunais` : tribunais[0]}
+                    </CardTitle>
+                    <Switch 
+                      checked={config.ativo} 
+                      onCheckedChange={() => handleToggleAtivo(config)}
+                    />
+                  </div>
+                  {tribunais.length > 1 && (
                     <div className="flex flex-wrap gap-1 mt-1">
-                      {config.horarios.map(h => (
-                        <Badge key={h} variant="secondary" className="text-xs">
-                          {h}
-                        </Badge>
+                      {tribunais.slice(0, 3).map(t => (
+                        <Badge key={t} variant="outline" className="text-xs">{t.trim()}</Badge>
                       ))}
+                      {tribunais.length > 3 && (
+                        <Badge variant="secondary" className="text-xs">+{tribunais.length - 3}</Badge>
+                      )}
                     </div>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Tipos:</span>
-                    <div className="flex gap-1">
-                      {config.tipos.map(t => (
-                        <Badge key={t} variant="outline" className="text-xs">
-                          {t === "D" ? "Judicial" : "Admin"}
-                        </Badge>
-                      ))}
+                  )}
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">Horários:</span>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {config.horarios.map(h => (
+                          <Badge key={h} variant="secondary" className="text-xs">
+                            {h}
+                          </Badge>
+                        ))}
+                      </div>
                     </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Tipos:</span>
+                      <div className="flex gap-1">
+                        {config.tipos.map(t => (
+                          <Badge key={t} variant="outline" className="text-xs">
+                            {t === "D" ? "Judicial" : "Admin"}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => setSelectedConfig(config)}
+                    >
+                      <Settings className="mr-2 h-3 w-3" />
+                      Configurar Horários
+                    </Button>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => setSelectedConfig(config)}
-                  >
-                    <Settings className="mr-2 h-3 w-3" />
-                    Configurar Horários
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            );
+          })}
           
           {/* Add new config card */}
           <Dialog open={configOpen} onOpenChange={setConfigOpen}>
@@ -347,7 +424,7 @@ export default function Cadernos() {
               <Card className="shadow-card border-dashed cursor-pointer hover:bg-muted/50 transition-colors">
                 <CardContent className="flex flex-col items-center justify-center h-full min-h-[180px]">
                   <Plus className="h-8 w-8 text-muted-foreground mb-2" />
-                  <span className="text-sm text-muted-foreground">Adicionar Tribunal</span>
+                  <span className="text-sm text-muted-foreground">Adicionar Tribunal(is)</span>
                 </CardContent>
               </Card>
             </DialogTrigger>
@@ -355,7 +432,7 @@ export default function Cadernos() {
               <DialogHeader>
                 <DialogTitle>Adicionar Configuração de Tribunal</DialogTitle>
                 <DialogDescription>
-                  Configure um novo tribunal para download automático de cadernos.
+                  Configure tribunais para download automático de cadernos.
                 </DialogDescription>
               </DialogHeader>
               <div className="grid gap-4 py-4">
@@ -366,15 +443,15 @@ export default function Cadernos() {
                     onChange={setNewTribunais}
                     placeholder="Selecione um ou mais tribunais..."
                     multiple={true}
-                    excludeTribunais={configs.map(c => c.tribunal)}
+                    excludeTribunais={configs.flatMap(c => c.tribunal.split(",").map(t => t.trim()))}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Selecione múltiplos tribunais para configurar em lote
+                    Selecione múltiplos tribunais - será criada UMA configuração para todos
                   </p>
                 </div>
                 <div className="grid gap-2">
                   <Label>Horários de Download</Label>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 border rounded-md">
                     {horariosDisponiveis.map(h => (
                       <Badge
                         key={h}
@@ -430,7 +507,7 @@ export default function Cadernos() {
             </DialogHeader>
             <div className="py-4">
               <Label className="mb-3 block">Horários de Download</Label>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-2 border rounded-md">
                 {horariosDisponiveis.map(h => (
                   <Badge
                     key={h}
@@ -470,32 +547,73 @@ export default function Cadernos() {
                 Download Manual
               </Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="sm:max-w-[500px]">
               <DialogHeader>
-                <DialogTitle>Download de Caderno</DialogTitle>
+                <DialogTitle>Download de Caderno(s)</DialogTitle>
                 <DialogDescription>
-                  Baixe um caderno específico do DJE manualmente.
+                  Baixe cadernos específicos do DJE manualmente.
                 </DialogDescription>
               </DialogHeader>
               <div className="grid gap-4 py-4">
                 <div className="grid gap-2">
-                  <Label>Tribunal</Label>
+                  <Label>Tribunais</Label>
                   <TribunalSelector
-                    value={downloadTribunal ? [downloadTribunal] : []}
-                    onChange={(vals) => setDownloadTribunal(vals[0] || "")}
-                    placeholder="Selecione o tribunal..."
-                    multiple={false}
+                    value={downloadTribunais}
+                    onChange={setDownloadTribunais}
+                    placeholder="Selecione um ou mais tribunais..."
+                    multiple={true}
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Selecione múltiplos tribunais para baixar de todos de uma vez
+                  </p>
                 </div>
+                
                 <div className="grid gap-2">
-                  <Label htmlFor="data">Data</Label>
-                  <Input 
-                    id="data" 
-                    type="date" 
-                    value={downloadData}
-                    onChange={(e) => setDownloadData(e.target.value)}
-                  />
+                  <Label>Modo de Download</Label>
+                  <Select value={downloadModo} onValueChange={(v) => setDownloadModo(v as "unico" | "periodo")}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unico">Data Única</SelectItem>
+                      <SelectItem value="periodo">Período (múltiplas datas)</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
+                
+                {downloadModo === "unico" ? (
+                  <div className="grid gap-2">
+                    <Label htmlFor="data">Data</Label>
+                    <Input 
+                      id="data" 
+                      type="date" 
+                      value={downloadDataInicio}
+                      onChange={(e) => setDownloadDataInicio(e.target.value)}
+                    />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="dataInicio">Data Inicial</Label>
+                      <Input 
+                        id="dataInicio" 
+                        type="date" 
+                        value={downloadDataInicio}
+                        onChange={(e) => setDownloadDataInicio(e.target.value)}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="dataFim">Data Final</Label>
+                      <Input 
+                        id="dataFim" 
+                        type="date" 
+                        value={downloadDataFim}
+                        onChange={(e) => setDownloadDataFim(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
+                
                 <div className="grid gap-2">
                   <Label>Tipo de Caderno</Label>
                   <Select value={downloadTipo} onValueChange={setDownloadTipo}>
@@ -523,7 +641,10 @@ export default function Cadernos() {
                 <Button variant="outline" onClick={() => setDownloadOpen(false)}>
                   Cancelar
                 </Button>
-                <Button onClick={handleDownload} disabled={!downloadTribunal || !downloadData || downloading}>
+                <Button 
+                  onClick={handleDownload} 
+                  disabled={downloadTribunais.length === 0 || !downloadDataInicio || downloading}
+                >
                   {downloading ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
@@ -552,8 +673,14 @@ export default function Cadernos() {
                     <div className="flex items-center gap-3">
                       <RefreshCw className="h-4 w-4 animate-spin text-primary" />
                       <div>
-                        <p className="font-medium">{downloadTribunal || "Preparando..."}</p>
-                        <p className="text-sm text-muted-foreground">{downloadData}</p>
+                        <p className="font-medium">
+                          {downloadTribunais.length > 1 
+                            ? `${downloadTribunais.length} tribunais` 
+                            : downloadTribunais[0] || "Preparando..."}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {downloadDataInicio} {downloadDataFim && `até ${downloadDataFim}`}
+                        </p>
                       </div>
                     </div>
                     <Badge className="bg-primary/10 text-primary">
