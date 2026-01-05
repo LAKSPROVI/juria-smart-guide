@@ -3,6 +3,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,10 +38,15 @@ import {
   Clock,
   AlertCircle,
   Loader2,
+  Cpu,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { getDocumentos, getDocumentosStats, Documento } from "@/lib/database";
+import { supabase } from "@/integrations/supabase/client";
+import { UploadDocumentos } from "@/components/documentos/UploadDocumentos";
+import { FilaProcessamento } from "@/components/documentos/FilaProcessamento";
+import { EstatisticasRAG } from "@/components/documentos/EstatisticasRAG";
 
 const statusConfig = {
   processado: {
@@ -72,6 +78,7 @@ export default function Documentos() {
   const [loading, setLoading] = useState(true);
   const [documentos, setDocumentos] = useState<Documento[]>([]);
   const [stats, setStats] = useState({ cadernos: 0, uploads: 0, favoritos: 0 });
+  const [activeTab, setActiveTab] = useState("documentos");
   const { toast } = useToast();
 
   useEffect(() => {
@@ -93,11 +100,36 @@ export default function Documentos() {
     }
   };
 
-  const handleUpload = () => {
-    toast({
-      title: "Upload",
-      description: "Funcionalidade de upload em desenvolvimento.",
-    });
+  const handleReprocessar = async (docId: string) => {
+    try {
+      toast({
+        title: "Reprocessando...",
+        description: "Documento adicionado à fila de processamento RAG.",
+      });
+
+      // Adicionar à fila
+      await supabase
+        .from('fila_processamento_rag')
+        .insert({
+          documento_id: docId,
+          prioridade: 8,
+          status: 'pendente',
+        });
+
+      // Chamar função de processamento
+      await supabase.functions.invoke('processar-documento-rag', {
+        body: { documento_id: docId }
+      });
+
+      loadData();
+    } catch (error) {
+      console.error("Erro ao reprocessar:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: "Falha ao reprocessar documento.",
+      });
+    }
   };
 
   const toggleSelectDoc = (id: string) => {
@@ -157,67 +189,102 @@ export default function Documentos() {
       subtitle="Gerencie todos os documentos do sistema RAG"
     >
       <div className="space-y-6 animate-fade-in">
-        {/* Quick Stats */}
-        <div className="grid gap-4 md:grid-cols-3">
-          {pastas.map((pasta) => (
-            <button
-              key={pasta.nome}
-              className="flex items-center gap-4 rounded-xl border border-border bg-card p-4 shadow-card transition-all hover:shadow-lg hover:-translate-y-0.5"
-            >
-              <div className="rounded-lg bg-primary/10 p-3">
-                <pasta.icon className="h-5 w-5 text-primary" />
-              </div>
-              <div className="text-left">
-                <p className="font-medium">{pasta.nome}</p>
-                <p className="text-sm text-muted-foreground">
-                  {pasta.count.toLocaleString()} arquivos
-                </p>
-              </div>
-            </button>
-          ))}
-        </div>
+        {/* Estatísticas RAG */}
+        <EstatisticasRAG />
 
-        {/* Toolbar */}
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="relative w-72">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Buscar documentos..."
-                className="pl-9"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <Button variant="outline" size="icon">
-              <Filter className="h-4 w-4" />
-            </Button>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex rounded-lg border border-border p-1">
-              <Button
-                variant={viewMode === "list" ? "secondary" : "ghost"}
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => setViewMode("list")}
-              >
-                <List className="h-4 w-4" />
-              </Button>
-              <Button
-                variant={viewMode === "grid" ? "secondary" : "ghost"}
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => setViewMode("grid")}
-              >
-                <Grid className="h-4 w-4" />
-              </Button>
-            </div>
-            <Button onClick={handleUpload}>
+        {/* Tabs */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="documentos">
+              <FileText className="mr-2 h-4 w-4" />
+              Documentos
+            </TabsTrigger>
+            <TabsTrigger value="upload">
               <Upload className="mr-2 h-4 w-4" />
               Upload
-            </Button>
-          </div>
-        </div>
+            </TabsTrigger>
+            <TabsTrigger value="fila">
+              <Cpu className="mr-2 h-4 w-4" />
+              Fila RAG
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="upload" className="space-y-4">
+            <UploadDocumentos onUploadComplete={() => {
+              loadData();
+              setActiveTab("documentos");
+            }} />
+          </TabsContent>
+
+          <TabsContent value="fila" className="space-y-4">
+            <div className="rounded-xl border border-border bg-card p-4">
+              <h3 className="font-semibold mb-4">Fila de Processamento RAG</h3>
+              <FilaProcessamento />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="documentos" className="space-y-4">
+            {/* Quick Stats */}
+            <div className="grid gap-4 md:grid-cols-3">
+              {pastas.map((pasta) => (
+                <button
+                  key={pasta.nome}
+                  className="flex items-center gap-4 rounded-xl border border-border bg-card p-4 shadow-card transition-all hover:shadow-lg hover:-translate-y-0.5"
+                >
+                  <div className="rounded-lg bg-primary/10 p-3">
+                    <pasta.icon className="h-5 w-5 text-primary" />
+                  </div>
+                  <div className="text-left">
+                    <p className="font-medium">{pasta.nome}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {pasta.count.toLocaleString()} arquivos
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {/* Toolbar */}
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="relative w-72">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Buscar documentos..."
+                    className="pl-9"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                </div>
+                <Button variant="outline" size="icon">
+                  <Filter className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex rounded-lg border border-border p-1">
+                  <Button
+                    variant={viewMode === "list" ? "secondary" : "ghost"}
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setViewMode("list")}
+                  >
+                    <List className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant={viewMode === "grid" ? "secondary" : "ghost"}
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setViewMode("grid")}
+                  >
+                    <Grid className="h-4 w-4" />
+                  </Button>
+                </div>
+                <Button onClick={() => setActiveTab("upload")}>
+                  <Upload className="mr-2 h-4 w-4" />
+                  Upload
+                </Button>
+              </div>
+            </div>
 
         {/* Selected Actions */}
         {selectedDocs.length > 0 && (
@@ -366,9 +433,9 @@ export default function Documentos() {
                               <Download className="mr-2 h-4 w-4" />
                               Download
                             </DropdownMenuItem>
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleReprocessar(doc.id)}>
                               <RefreshCw className="mr-2 h-4 w-4" />
-                              Reprocessar
+                              Reprocessar RAG
                             </DropdownMenuItem>
                             <DropdownMenuItem className="text-destructive">
                               <Trash2 className="mr-2 h-4 w-4" />
@@ -384,20 +451,8 @@ export default function Documentos() {
             </TableBody>
           </Table>
         </div>
-
-        {/* Upload Area */}
-        <div className="rounded-xl border-2 border-dashed border-border bg-muted/30 p-12 text-center">
-          <Upload className="mx-auto h-12 w-12 text-muted-foreground" />
-          <h3 className="mt-4 text-lg font-semibold">
-            Arraste arquivos aqui para fazer upload
-          </h3>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Suporta PDF, DOCX e TXT. Máximo 50MB por arquivo.
-          </p>
-          <Button className="mt-4" onClick={handleUpload}>
-            Selecionar Arquivos
-          </Button>
-        </div>
+          </TabsContent>
+        </Tabs>
       </div>
     </AppLayout>
   );

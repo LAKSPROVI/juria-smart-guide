@@ -14,50 +14,227 @@ interface ChatMessage {
 interface ChatRequest {
   messages: ChatMessage[];
   context?: string;
+  filtro_documento_id?: string;
+  filtro_numero_processo?: string;
 }
 
-// Buscar contexto relevante do RAG baseado na pergunta do usuário
-async function buscarContextoRAG(supabase: any, pergunta: string): Promise<string> {
+interface ChunkResultado {
+  id: string;
+  documento_id: string;
+  conteudo: string;
+  contexto_resumo: string;
+  numero_processo: string;
+  metadata: any;
+  titulo_secao: string;
+  pagina_inicio: number;
+  similarity: number;
+  text_rank: number;
+  combined_score: number;
+}
+
+// Gerar embedding para a query
+async function gerarEmbeddingQuery(texto: string, apiKey: string): Promise<number[]> {
+  const response = await fetch('https://ai.gateway.lovable.dev/v1/embeddings', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'text-embedding-3-small',
+      input: texto.substring(0, 8000),
+      dimensions: 768,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Erro ao gerar embedding: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.data[0].embedding;
+}
+
+// Re-ranking usando LLM para melhorar relevância
+async function rerankarResultados(
+  pergunta: string,
+  chunks: ChunkResultado[],
+  apiKey: string,
+  topK: number = 5
+): Promise<ChunkResultado[]> {
+  if (chunks.length <= topK) return chunks;
+
   try {
-    // Extrair termos de busca da pergunta
-    const termos = pergunta.toLowerCase()
-      .replace(/[?!.,;:]/g, '')
-      .split(' ')
-      .filter(t => t.length > 3);
+    const prompt = `Você é um assistente de re-ranking. Dado a pergunta do usuário e os documentos abaixo, ordene os documentos por relevância (mais relevante primeiro).
+
+PERGUNTA: ${pergunta}
+
+DOCUMENTOS:
+${chunks.slice(0, 15).map((c, i) => `[${i}] ${c.conteudo.substring(0, 300)}...`).join('\n\n')}
+
+Responda APENAS com os índices dos ${topK} documentos mais relevantes, separados por vírgula. Exemplo: 2,0,5,1,3`;
+
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash-lite',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 50,
+        temperature: 0,
+      }),
+    });
+
+    if (!response.ok) {
+      console.log('Re-ranking falhou, usando ordem original');
+      return chunks.slice(0, topK);
+    }
+
+    const data = await response.json();
+    const resposta = data.choices?.[0]?.message?.content || '';
+    const indices = resposta.match(/\d+/g)?.map(Number) || [];
     
-    // Buscar chunks relevantes
+    const reordenados: ChunkResultado[] = [];
+    for (const idx of indices) {
+      if (idx < chunks.length && !reordenados.includes(chunks[idx])) {
+        reordenados.push(chunks[idx]);
+      }
+      if (reordenados.length >= topK) break;
+    }
+
+    // Completar com restantes se necessário
+    for (const chunk of chunks) {
+      if (!reordenados.includes(chunk)) {
+        reordenados.push(chunk);
+      }
+      if (reordenados.length >= topK) break;
+    }
+
+    return reordenados;
+  } catch (e) {
+    console.error('Erro no re-ranking:', e);
+    return chunks.slice(0, topK);
+  }
+}
+
+// Buscar contexto relevante do RAG usando busca híbrida vetorial + full-text
+async function buscarContextoRAG(
+  supabase: any, 
+  pergunta: string, 
+  apiKey: string,
+  filtroDocumentoId?: string,
+  filtroNumeroProcesso?: string
+): Promise<{ contexto: string; fontes: any[] }> {
+  try {
+    // Verificar se tem número de processo na pergunta
+    const processoMatch = pergunta.match(/\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}/);
+    const numeroProcesso = filtroNumeroProcesso || (processoMatch ? processoMatch[0] : null);
+
+    // Verificar se existem chunks com embeddings
+    const { count } = await supabase
+      .from('documento_chunks')
+      .select('id', { count: 'exact', head: true })
+      .not('embedding', 'is', null);
+
+    if (count && count > 0) {
+      // Usar busca híbrida vetorial + full-text
+      console.log('Usando busca híbrida vetorial...');
+      
+      // Gerar embedding da pergunta
+      const queryEmbedding = await gerarEmbeddingQuery(pergunta, apiKey);
+      
+      // Busca híbrida
+      const { data: chunks, error } = await supabase.rpc('busca_hibrida_rag', {
+        query_embedding: JSON.stringify(queryEmbedding),
+        query_text: pergunta,
+        match_threshold: 0.3,
+        match_count: 20,
+        filtro_documento_id: filtroDocumentoId || null,
+        filtro_numero_processo: numeroProcesso,
+      });
+
+      if (error) {
+        console.error('Erro na busca híbrida:', error);
+      } else if (chunks && chunks.length > 0) {
+        console.log(`Encontrados ${chunks.length} chunks via busca híbrida`);
+        
+        // Re-ranking para melhorar resultados
+        const chunksRerankeados = await rerankarResultados(pergunta, chunks, apiKey, 8);
+        
+        const fontes = chunksRerankeados.map((c: ChunkResultado) => ({
+          id: c.id,
+          numero_processo: c.numero_processo,
+          secao: c.titulo_secao,
+          score: c.combined_score,
+          documento_id: c.documento_id,
+        }));
+
+        const contexto = chunksRerankeados.map((c: ChunkResultado, i: number) => {
+          const header = [
+            c.numero_processo ? `Processo: ${c.numero_processo}` : null,
+            c.titulo_secao ? `Seção: ${c.titulo_secao}` : null,
+            c.contexto_resumo ? `Contexto: ${c.contexto_resumo}` : null,
+          ].filter(Boolean).join(' | ');
+          
+          return `[DOCUMENTO ${i + 1}]${header ? `\n${header}` : ''}\n${c.conteudo}`;
+        }).join('\n\n---\n\n');
+
+        return { contexto, fontes };
+      }
+    }
+
+    // Fallback: busca por texto simples se não há embeddings
+    console.log('Usando busca por texto simples (fallback)...');
+    
     let query = supabase
       .from('documento_chunks')
-      .select('conteudo, numero_processo, metadata')
+      .select('id, conteudo, numero_processo, metadata, titulo_secao, contexto_resumo')
       .order('created_at', { ascending: false })
       .limit(10);
     
-    // Se tem número de processo específico na pergunta
-    const processoMatch = pergunta.match(/\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}/);
-    if (processoMatch) {
-      query = supabase
-        .from('documento_chunks')
-        .select('conteudo, numero_processo, metadata')
-        .ilike('numero_processo', `%${processoMatch[0]}%`)
-        .limit(5);
+    if (numeroProcesso) {
+      query = query.ilike('numero_processo', `%${numeroProcesso}%`);
     }
-    
+
     const { data: chunks, error } = await query;
     
-    if (error || !chunks || chunks.length === 0) {
-      // Buscar também nos resultados de consultas recentes
-      const { data: resultados, error: e2 } = await supabase
-        .from('resultados_consultas')
-        .select('numero_processo, sigla_tribunal, nome_orgao, tipo_comunicacao, texto_mensagem, data_disponibilizacao')
-        .order('created_at', { ascending: false })
-        .limit(20);
-      
-      if (e2 || !resultados || resultados.length === 0) {
-        return '';
-      }
-      
-      // Formatar resultados como contexto
-      return resultados.map((r: any, i: number) => `
+    if (!error && chunks && chunks.length > 0) {
+      const fontes = chunks.map((c: any) => ({
+        id: c.id,
+        numero_processo: c.numero_processo,
+        secao: c.titulo_secao,
+      }));
+
+      const contexto = chunks.map((c: any, i: number) => `
+[DOCUMENTO ${i + 1}]
+${c.numero_processo ? `Processo: ${c.numero_processo}` : ''}
+${c.titulo_secao ? `Seção: ${c.titulo_secao}` : ''}
+${c.conteudo}
+`).join('\n---\n');
+
+      return { contexto, fontes };
+    }
+
+    // Último fallback: resultados de consultas
+    const { data: resultados, error: e2 } = await supabase
+      .from('resultados_consultas')
+      .select('numero_processo, sigla_tribunal, nome_orgao, tipo_comunicacao, texto_mensagem, data_disponibilizacao')
+      .order('created_at', { ascending: false })
+      .limit(20);
+    
+    if (e2 || !resultados || resultados.length === 0) {
+      return { contexto: '', fontes: [] };
+    }
+    
+    const fontes = resultados.map((r: any) => ({
+      numero_processo: r.numero_processo,
+      tribunal: r.sigla_tribunal,
+    }));
+
+    const contexto = resultados.map((r: any, i: number) => `
 [RESULTADO ${i + 1}]
 Processo: ${r.numero_processo || 'Não informado'}
 Tribunal: ${r.sigla_tribunal || 'Não informado'}
@@ -66,17 +243,12 @@ Tipo: ${r.tipo_comunicacao || 'Não informado'}
 Data: ${r.data_disponibilizacao || 'Não informada'}
 Conteúdo: ${r.texto_mensagem?.substring(0, 500) || 'Sem texto'}
 `).join('\n---\n');
-    }
-    
-    // Formatar chunks como contexto
-    return chunks.map((c: any, i: number) => `
-[DOCUMENTO ${i + 1}]
-${c.conteudo}
-`).join('\n---\n');
+
+    return { contexto, fontes };
     
   } catch (e) {
     console.error('Erro ao buscar contexto RAG:', e);
-    return '';
+    return { contexto: '', fontes: [] };
   }
 }
 
@@ -86,7 +258,7 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, context }: ChatRequest = await req.json();
+    const { messages, context, filtro_documento_id, filtro_numero_processo }: ChatRequest = await req.json();
     
     console.log("Recebendo requisição de chat:", messages.length, "mensagens");
 
@@ -103,8 +275,14 @@ serve(async (req) => {
     // Pegar a última mensagem do usuário para buscar contexto relevante
     const ultimaMensagem = messages.filter(m => m.role === 'user').pop()?.content || '';
     
-    // Buscar contexto do RAG
-    const contextoRAG = await buscarContextoRAG(supabase, ultimaMensagem);
+    // Buscar contexto do RAG com busca híbrida
+    const { contexto: contextoRAG, fontes } = await buscarContextoRAG(
+      supabase, 
+      ultimaMensagem, 
+      apiKey,
+      filtro_documento_id,
+      filtro_numero_processo
+    );
     
     // Combinar contexto fornecido com o do RAG
     const contextoFinal = [context, contextoRAG].filter(Boolean).join('\n\n---\n\n');
@@ -161,6 +339,7 @@ ${contextoFinal ? `CONTEXTO DOS DOCUMENTOS E INTIMAÇÕES DISPONÍVEIS:\n${conte
         message: assistantMessage,
         usage: data.usage,
         hasContext: contextoFinal.length > 0,
+        fontes: fontes,
       }),
       { 
         headers: { ...corsHeaders, "Content-Type": "application/json" }

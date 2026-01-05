@@ -209,30 +209,57 @@ export type Database = {
       documento_chunks: {
         Row: {
           chunk_index: number
+          chunk_type: string | null
           conteudo: string
+          contexto_resumo: string | null
           created_at: string
           documento_id: string | null
+          embedding: string | null
           id: string
           metadata: Json | null
           numero_processo: string | null
+          pagina_fim: number | null
+          pagina_inicio: number | null
+          parent_chunk_id: string | null
+          search_vector: unknown
+          titulo_secao: string | null
+          tokens_count: number | null
         }
         Insert: {
           chunk_index: number
+          chunk_type?: string | null
           conteudo: string
+          contexto_resumo?: string | null
           created_at?: string
           documento_id?: string | null
+          embedding?: string | null
           id?: string
           metadata?: Json | null
           numero_processo?: string | null
+          pagina_fim?: number | null
+          pagina_inicio?: number | null
+          parent_chunk_id?: string | null
+          search_vector?: unknown
+          titulo_secao?: string | null
+          tokens_count?: number | null
         }
         Update: {
           chunk_index?: number
+          chunk_type?: string | null
           conteudo?: string
+          contexto_resumo?: string | null
           created_at?: string
           documento_id?: string | null
+          embedding?: string | null
           id?: string
           metadata?: Json | null
           numero_processo?: string | null
+          pagina_fim?: number | null
+          pagina_inicio?: number | null
+          parent_chunk_id?: string | null
+          search_vector?: unknown
+          titulo_secao?: string | null
+          tokens_count?: number | null
         }
         Relationships: [
           {
@@ -240,6 +267,13 @@ export type Database = {
             columns: ["documento_id"]
             isOneToOne: false
             referencedRelation: "documentos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "documento_chunks_parent_chunk_id_fkey"
+            columns: ["parent_chunk_id"]
+            isOneToOne: false
+            referencedRelation: "documento_chunks"
             referencedColumns: ["id"]
           },
         ]
@@ -353,6 +387,66 @@ export type Database = {
           },
         ]
       }
+      fila_processamento_rag: {
+        Row: {
+          caderno_id: string | null
+          chunks_processados: number | null
+          created_at: string | null
+          documento_id: string | null
+          erro_mensagem: string | null
+          finalizado_em: string | null
+          id: string
+          iniciado_em: string | null
+          prioridade: number | null
+          progresso: number | null
+          status: string | null
+          total_chunks: number | null
+        }
+        Insert: {
+          caderno_id?: string | null
+          chunks_processados?: number | null
+          created_at?: string | null
+          documento_id?: string | null
+          erro_mensagem?: string | null
+          finalizado_em?: string | null
+          id?: string
+          iniciado_em?: string | null
+          prioridade?: number | null
+          progresso?: number | null
+          status?: string | null
+          total_chunks?: number | null
+        }
+        Update: {
+          caderno_id?: string | null
+          chunks_processados?: number | null
+          created_at?: string | null
+          documento_id?: string | null
+          erro_mensagem?: string | null
+          finalizado_em?: string | null
+          id?: string
+          iniciado_em?: string | null
+          prioridade?: number | null
+          progresso?: number | null
+          status?: string | null
+          total_chunks?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fila_processamento_rag_caderno_id_fkey"
+            columns: ["caderno_id"]
+            isOneToOne: false
+            referencedRelation: "cadernos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fila_processamento_rag_documento_id_fkey"
+            columns: ["documento_id"]
+            isOneToOne: false
+            referencedRelation: "documentos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       mensagens: {
         Row: {
           content: string
@@ -387,6 +481,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      query_embeddings_cache: {
+        Row: {
+          created_at: string | null
+          embedding: string | null
+          hit_count: number | null
+          id: string
+          last_used_at: string | null
+          query_hash: string | null
+          query_text: string
+        }
+        Insert: {
+          created_at?: string | null
+          embedding?: string | null
+          hit_count?: number | null
+          id?: string
+          last_used_at?: string | null
+          query_hash?: string | null
+          query_text: string
+        }
+        Update: {
+          created_at?: string | null
+          embedding?: string | null
+          hit_count?: number | null
+          id?: string
+          last_used_at?: string | null
+          query_hash?: string | null
+          query_text?: string
+        }
+        Relationships: []
       }
       resultados_consultas: {
         Row: {
@@ -497,7 +621,46 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      busca_hibrida_rag: {
+        Args: {
+          filtro_documento_id?: string
+          filtro_numero_processo?: string
+          match_count?: number
+          match_threshold?: number
+          query_embedding: string
+          query_text: string
+        }
+        Returns: {
+          combined_score: number
+          conteudo: string
+          contexto_resumo: string
+          documento_id: string
+          id: string
+          metadata: Json
+          numero_processo: string
+          pagina_inicio: number
+          similarity: number
+          text_rank: number
+          titulo_secao: string
+        }[]
+      }
+      busca_vetorial_rag: {
+        Args: {
+          filtro_documento_id?: string
+          match_count?: number
+          match_threshold?: number
+          query_embedding: string
+        }
+        Returns: {
+          conteudo: string
+          contexto_resumo: string
+          documento_id: string
+          id: string
+          metadata: Json
+          numero_processo: string
+          similarity: number
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

@@ -34,12 +34,22 @@ import {
 } from "@/lib/database";
 import { registrarLog } from "@/lib/logging";
 
+interface ChatSource {
+  id?: string;
+  numero_processo?: string;
+  secao?: string;
+  score?: number;
+  documento_id?: string;
+  tribunal?: string;
+}
+
 interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
-  sources?: { title: string; processo: string }[];
+  sources?: ChatSource[];
+  hasContext?: boolean;
 }
 
 const suggestedPrompts = [
@@ -199,17 +209,21 @@ export default function Chat() {
         ? data.message 
         : "Desculpe, ocorreu um erro ao processar sua solicitação.";
 
+      const fontes = data.fontes || [];
+
       const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
         content: assistantContent,
         timestamp: new Date(),
+        sources: fontes,
+        hasContext: data.hasContext,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
       
-      // Salvar resposta no banco
-      await addMensagem(currentConversaId, "assistant", assistantContent);
+      // Salvar resposta no banco com fontes
+      await addMensagem(currentConversaId, "assistant", assistantContent, fontes.length > 0 ? fontes : null);
       
       // Registrar log de interação
       await registrarLog({
@@ -372,17 +386,24 @@ export default function Chat() {
                       <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                     </div>
                     {message.sources && message.sources.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {message.sources.map((source, i) => (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        <span className="text-xs text-muted-foreground">Fontes:</span>
+                        {message.sources.slice(0, 5).map((source, i) => (
                           <Badge
                             key={i}
                             variant="secondary"
                             className="text-xs font-normal"
+                            title={source.score ? `Score: ${(source.score * 100).toFixed(0)}%` : undefined}
                           >
                             <FileText className="mr-1 h-3 w-3" />
-                            {source.title}
+                            {source.numero_processo || source.secao || `Doc ${i + 1}`}
                           </Badge>
                         ))}
+                        {message.sources.length > 5 && (
+                          <Badge variant="outline" className="text-xs">
+                            +{message.sources.length - 5} mais
+                          </Badge>
+                        )}
                       </div>
                     )}
                     <span className="text-xs text-muted-foreground">
