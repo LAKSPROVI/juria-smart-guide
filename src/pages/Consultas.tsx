@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,51 +39,31 @@ import {
   XCircle,
   Loader2,
   FileText,
+  History,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { consultarIntimacoes, IntimacaoResult } from "@/lib/api";
+import { 
+  getConsultas, 
+  createConsulta, 
+  updateConsulta, 
+  deleteConsulta,
+  saveResultados,
+  Consulta 
+} from "@/lib/database";
 import { ScrollArea } from "@/components/ui/scroll-area";
-
-interface Consulta {
-  id: string;
-  nome: string;
-  tribunal: string;
-  tipo: string;
-  termo: string;
-  recorrencia: string;
-  ultimaExecucao: string;
-  status: "ativo" | "inativo";
-  resultados: number;
-}
-
-const consultasIniciais: Consulta[] = [
-  {
-    id: "1",
-    nome: "Márcia Gabriela - TJSP",
-    tribunal: "TJSP",
-    tipo: "Nome Advogado",
-    termo: "Márcia Gabriela de Abreu",
-    recorrencia: "Diária - 9h",
-    ultimaExecucao: "25/12/2025 09:00",
-    status: "ativo",
-    resultados: 0,
-  },
-];
+import { Switch } from "@/components/ui/switch";
+import { useNavigate } from "react-router-dom";
 
 const tribunais = [
-  "TJSP",
-  "TJRJ",
-  "TJMG",
-  "TRF1",
-  "TRF2",
-  "TRF3",
-  "TRF4",
-  "TRF5",
-  "TRT1",
-  "TRT2",
-  "TST",
-  "STJ",
-  "STF",
+  "TJSP", "TJRJ", "TJMG", "TRF1", "TRF2", "TRF3", "TRF4", "TRF5",
+  "TRT1", "TRT2", "TST", "STJ", "STF",
+];
+
+const horariosDisponiveis = [
+  "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00",
+  "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00",
+  "20:00", "21:00", "22:00", "23:00",
 ];
 
 export default function Consultas() {
@@ -91,19 +71,44 @@ export default function Consultas() {
   const [resultadosOpen, setResultadosOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingConsultas, setLoadingConsultas] = useState(true);
   const [resultados, setResultados] = useState<IntimacaoResult[]>([]);
   const [consultaAtual, setConsultaAtual] = useState<Consulta | null>(null);
-  const [consultas, setConsultas] = useState<Consulta[]>(consultasIniciais);
+  const [consultas, setConsultas] = useState<Consulta[]>([]);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   // Form state
   const [formNome, setFormNome] = useState("");
   const [formTribunal, setFormTribunal] = useState("");
   const [formTipo, setFormTipo] = useState("");
   const [formTermo, setFormTermo] = useState("");
+  const [formNumeroOab, setFormNumeroOab] = useState("");
+  const [formUfOab, setFormUfOab] = useState("");
   const [formDataInicio, setFormDataInicio] = useState("");
   const [formDataFim, setFormDataFim] = useState("");
-  const [formRecorrencia, setFormRecorrencia] = useState("");
+  const [formRecorrencia, setFormRecorrencia] = useState("manual");
+  const [formHorarios, setFormHorarios] = useState<string[]>(["09:00"]);
+
+  useEffect(() => {
+    loadConsultas();
+  }, []);
+
+  const loadConsultas = async () => {
+    try {
+      const data = await getConsultas();
+      setConsultas(data);
+    } catch (error) {
+      console.error("Erro ao carregar consultas:", error);
+      toast({
+        title: "Erro ao carregar consultas",
+        description: "Não foi possível carregar as consultas salvas.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingConsultas(false);
+    }
+  };
 
   const handleExecutar = async (consulta: Consulta) => {
     setLoading(true);
@@ -117,9 +122,11 @@ export default function Consultas() {
 
       const response = await consultarIntimacoes({
         termo: consulta.termo,
+        numeroOab: consulta.numero_oab,
+        ufOab: consulta.uf_oab,
         siglaTribunal: consulta.tribunal,
-        dataInicial: "2025-12-20",
-        dataFinal: "2025-12-25",
+        dataInicial: consulta.data_inicial,
+        dataFinal: consulta.data_final,
       });
 
       console.log("Resposta da API:", response);
@@ -129,18 +136,21 @@ export default function Consultas() {
         setResultados(data);
         setResultadosOpen(true);
         
-        // Atualizar número de resultados na consulta
-        setConsultas(prev => 
-          prev.map(c => 
-            c.id === consulta.id 
-              ? { ...c, resultados: data.length, ultimaExecucao: new Date().toLocaleString('pt-BR') }
-              : c
-          )
-        );
+        // Salvar resultados no banco
+        if (data.length > 0) {
+          await saveResultados(consulta.id, data);
+        }
+        
+        // Atualizar última execução
+        await updateConsulta(consulta.id, { 
+          ultima_execucao: new Date().toISOString() 
+        });
+        
+        await loadConsultas();
 
         toast({
           title: "Consulta executada com sucesso!",
-          description: `${data.length} intimação(ões) encontrada(s).`,
+          description: `${data.length} intimação(ões) encontrada(s) e salva(s).`,
         });
       } else {
         toast({
@@ -161,39 +171,111 @@ export default function Consultas() {
     }
   };
 
-  const handleCriarConsulta = () => {
-    const novaConsulta: Consulta = {
-      id: Date.now().toString(),
-      nome: formNome || `${formTermo} - ${formTribunal}`,
-      tribunal: formTribunal,
-      tipo: formTipo === "nome_advogado" ? "Nome Advogado" : 
-            formTipo === "oab" ? "Número OAB" :
-            formTipo === "processo" ? "Número Processo" : "Nome Parte",
-      termo: formTermo,
-      recorrencia: formRecorrencia === "diaria" ? "Diária - 9h" :
-                   formRecorrencia === "semanal" ? "Semanal" : "Manual",
-      ultimaExecucao: "-",
-      status: "ativo",
-      resultados: 0,
-    };
-
-    setConsultas(prev => [...prev, novaConsulta]);
-    setOpen(false);
-    
-    // Reset form
-    setFormNome("");
-    setFormTribunal("");
-    setFormTipo("");
-    setFormTermo("");
-    setFormDataInicio("");
-    setFormDataFim("");
-    setFormRecorrencia("");
-    
-    toast({
-      title: "Consulta criada",
-      description: "A nova consulta foi configurada com sucesso.",
-    });
+  const handleToggleAtivo = async (consulta: Consulta) => {
+    try {
+      await updateConsulta(consulta.id, { ativo: !consulta.ativo });
+      await loadConsultas();
+      toast({
+        title: consulta.ativo ? "Consulta desativada" : "Consulta ativada",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro ao atualizar consulta",
+        variant: "destructive",
+      });
+    }
   };
+
+  const handleDelete = async (consulta: Consulta) => {
+    if (!confirm(`Tem certeza que deseja excluir a consulta "${consulta.nome}"?`)) {
+      return;
+    }
+    
+    try {
+      await deleteConsulta(consulta.id);
+      await loadConsultas();
+      toast({
+        title: "Consulta excluída",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro ao excluir consulta",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const toggleHorario = (horario: string) => {
+    setFormHorarios(prev => 
+      prev.includes(horario) 
+        ? prev.filter(h => h !== horario)
+        : [...prev, horario].sort()
+    );
+  };
+
+  const handleCriarConsulta = async () => {
+    try {
+      await createConsulta({
+        nome: formNome || `${formTermo} - ${formTribunal}`,
+        tribunal: formTribunal,
+        tipo: formTipo,
+        termo: formTermo,
+        numero_oab: formNumeroOab || undefined,
+        uf_oab: formUfOab || undefined,
+        data_inicial: formDataInicio || undefined,
+        data_final: formDataFim || undefined,
+        recorrencia: formRecorrencia,
+        horarios: formHorarios,
+        ativo: true,
+      });
+
+      setOpen(false);
+      await loadConsultas();
+      
+      // Reset form
+      setFormNome("");
+      setFormTribunal("");
+      setFormTipo("");
+      setFormTermo("");
+      setFormNumeroOab("");
+      setFormUfOab("");
+      setFormDataInicio("");
+      setFormDataFim("");
+      setFormRecorrencia("manual");
+      setFormHorarios(["09:00"]);
+      
+      toast({
+        title: "Consulta criada",
+        description: "A nova consulta foi configurada com sucesso.",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro ao criar consulta",
+        description: error instanceof Error ? error.message : "Erro desconhecido",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const formatRecorrencia = (consulta: Consulta) => {
+    if (consulta.recorrencia === "manual") return "Manual";
+    if (consulta.recorrencia === "diaria") {
+      return `Diária - ${consulta.horarios?.join(", ") || "09:00"}`;
+    }
+    if (consulta.recorrencia === "semanal") return "Semanal";
+    return consulta.recorrencia;
+  };
+
+  const formatUltimaExecucao = (data?: string) => {
+    if (!data) return "-";
+    return new Date(data).toLocaleString("pt-BR");
+  };
+
+  const filteredConsultas = consultas.filter(c => 
+    c.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.termo.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.tribunal.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
     <AppLayout
@@ -203,14 +285,20 @@ export default function Consultas() {
       <div className="space-y-6 animate-fade-in">
         {/* Header Actions */}
         <div className="flex items-center justify-between">
-          <div className="relative w-72">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Buscar consultas..."
-              className="pl-9"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+          <div className="flex items-center gap-3">
+            <div className="relative w-72">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Buscar consultas..."
+                className="pl-9"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <Button variant="outline" onClick={() => navigate("/resultados")}>
+              <History className="mr-2 h-4 w-4" />
+              Ver Histórico
+            </Button>
           </div>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
@@ -219,14 +307,14 @@ export default function Consultas() {
                 Nova Consulta
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[500px]">
+            <DialogContent className="sm:max-w-[600px]">
               <DialogHeader>
                 <DialogTitle>Nova Consulta</DialogTitle>
                 <DialogDescription>
                   Configure uma nova busca automatizada na ComunicaAPI.
                 </DialogDescription>
               </DialogHeader>
-              <div className="grid gap-4 py-4">
+              <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto">
                 <div className="grid gap-2">
                   <Label htmlFor="nome">Nome da Consulta</Label>
                   <Input
@@ -245,9 +333,7 @@ export default function Consultas() {
                       </SelectTrigger>
                       <SelectContent>
                         {tribunais.map((t) => (
-                          <SelectItem key={t} value={t}>
-                            {t}
-                          </SelectItem>
+                          <SelectItem key={t} value={t}>{t}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -259,18 +345,15 @@ export default function Consultas() {
                         <SelectValue placeholder="Selecione..." />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="nome_advogado">
-                          Nome Advogado
-                        </SelectItem>
+                        <SelectItem value="nome_advogado">Nome Advogado</SelectItem>
                         <SelectItem value="oab">Número OAB</SelectItem>
-                        <SelectItem value="processo">
-                          Número Processo
-                        </SelectItem>
+                        <SelectItem value="processo">Número Processo</SelectItem>
                         <SelectItem value="parte">Nome Parte</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
+                
                 <div className="grid gap-2">
                   <Label htmlFor="termo">Termo de Busca</Label>
                   <Input
@@ -280,6 +363,31 @@ export default function Consultas() {
                     onChange={(e) => setFormTermo(e.target.value)}
                   />
                 </div>
+
+                {formTipo === "oab" && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="numeroOab">Número OAB</Label>
+                      <Input
+                        id="numeroOab"
+                        placeholder="Ex: 123456"
+                        value={formNumeroOab}
+                        onChange={(e) => setFormNumeroOab(e.target.value)}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="ufOab">UF OAB</Label>
+                      <Input
+                        id="ufOab"
+                        placeholder="Ex: SP"
+                        value={formUfOab}
+                        onChange={(e) => setFormUfOab(e.target.value.toUpperCase())}
+                        maxLength={2}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
                     <Label htmlFor="dataInicio">Data Inicial</Label>
@@ -300,6 +408,7 @@ export default function Consultas() {
                     />
                   </div>
                 </div>
+                
                 <div className="grid gap-2">
                   <Label>Recorrência</Label>
                   <Select value={formRecorrencia} onValueChange={setFormRecorrencia}>
@@ -310,18 +419,38 @@ export default function Consultas() {
                       <SelectItem value="manual">Manual</SelectItem>
                       <SelectItem value="diaria">Diária</SelectItem>
                       <SelectItem value="semanal">Semanal</SelectItem>
-                      <SelectItem value="personalizada">
-                        Personalizada
-                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+
+                {formRecorrencia !== "manual" && (
+                  <div className="grid gap-2">
+                    <Label>Horários de Execução</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {horariosDisponiveis.map((h) => (
+                        <Badge
+                          key={h}
+                          variant={formHorarios.includes(h) ? "default" : "outline"}
+                          className="cursor-pointer"
+                          onClick={() => toggleHorario(h)}
+                        >
+                          {h}
+                        </Badge>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Clique para selecionar múltiplos horários
+                    </p>
+                  </div>
+                )}
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setOpen(false)}>
                   Cancelar
                 </Button>
-                <Button onClick={handleCriarConsulta}>Criar Consulta</Button>
+                <Button onClick={handleCriarConsulta} disabled={!formTribunal || !formTipo || !formTermo}>
+                  Criar Consulta
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -329,82 +458,104 @@ export default function Consultas() {
 
         {/* Table */}
         <div className="rounded-xl border border-border bg-card shadow-card">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Nome</TableHead>
-                <TableHead>Tribunal</TableHead>
-                <TableHead>Tipo</TableHead>
-                <TableHead>Termo</TableHead>
-                <TableHead>Recorrência</TableHead>
-                <TableHead>Última Execução</TableHead>
-                <TableHead>Resultados</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {consultas.map((consulta) => (
-                <TableRow key={consulta.id}>
-                  <TableCell className="font-medium">{consulta.nome}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{consulta.tribunal}</Badge>
-                  </TableCell>
-                  <TableCell>{consulta.tipo}</TableCell>
-                  <TableCell className="max-w-[200px] truncate">
-                    {consulta.termo}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                      <Clock className="h-3 w-3" />
-                      {consulta.recorrencia}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {consulta.ultimaExecucao}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{consulta.resultados}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    {consulta.status === "ativo" ? (
-                      <Badge className="bg-success/10 text-success hover:bg-success/20">
-                        <CheckCircle className="mr-1 h-3 w-3" />
-                        Ativo
-                      </Badge>
-                    ) : (
-                      <Badge variant="secondary">
-                        <XCircle className="mr-1 h-3 w-3" />
-                        Inativo
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleExecutar(consulta)}
-                        disabled={loading}
-                      >
-                        {loading && consultaAtual?.id === consulta.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Play className="h-4 w-4" />
-                        )}
-                      </Button>
-                      <Button variant="ghost" size="icon">
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon">
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
-                  </TableCell>
+          {loadingConsultas ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Nome</TableHead>
+                  <TableHead>Tribunal</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Termo</TableHead>
+                  <TableHead>Recorrência</TableHead>
+                  <TableHead>Última Execução</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filteredConsultas.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                      Nenhuma consulta configurada. Clique em "Nova Consulta" para começar.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredConsultas.map((consulta) => (
+                    <TableRow key={consulta.id}>
+                      <TableCell className="font-medium">{consulta.nome}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">{consulta.tribunal}</Badge>
+                      </TableCell>
+                      <TableCell className="capitalize">{consulta.tipo.replace("_", " ")}</TableCell>
+                      <TableCell className="max-w-[200px] truncate">
+                        {consulta.termo}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                          <Clock className="h-3 w-3" />
+                          {formatRecorrencia(consulta)}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {formatUltimaExecucao(consulta.ultima_execucao)}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={consulta.ativo}
+                            onCheckedChange={() => handleToggleAtivo(consulta)}
+                          />
+                          {consulta.ativo ? (
+                            <Badge className="bg-success/10 text-success hover:bg-success/20">
+                              <CheckCircle className="mr-1 h-3 w-3" />
+                              Ativo
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary">
+                              <XCircle className="mr-1 h-3 w-3" />
+                              Inativo
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleExecutar(consulta)}
+                            disabled={loading}
+                            title="Executar consulta"
+                          >
+                            {loading && consultaAtual?.id === consulta.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Play className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button variant="ghost" size="icon" title="Editar">
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            onClick={() => handleDelete(consulta)}
+                            title="Excluir"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          )}
         </div>
 
         {/* Resultados Dialog */}
@@ -475,36 +626,12 @@ export default function Consultas() {
               <Button variant="outline" onClick={() => setResultadosOpen(false)}>
                 Fechar
               </Button>
-              <Button onClick={() => {
-                toast({
-                  title: "Funcionalidade em desenvolvimento",
-                  description: "O processamento RAG será implementado em breve.",
-                });
-              }}>
-                Processar no RAG
+              <Button onClick={() => navigate("/resultados")}>
+                Ver Todo Histórico
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
-
-        {/* Info Card */}
-        <div className="rounded-xl border border-border bg-card p-6 shadow-card">
-          <h3 className="text-lg font-semibold mb-2">
-            Sobre as Consultas por Termo
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            As consultas utilizam a ComunicaAPI do PJe para buscar intimações e
-            comunicações nos Diários de Justiça Eletrônicos. Você pode
-            configurar buscas por nome de advogado, número da OAB, número de
-            processo ou nome de parte. Os resultados são processados
-            automaticamente e ficam disponíveis para análise no sistema RAG.
-          </p>
-          <div className="mt-4 p-3 rounded-lg bg-primary/10 border border-primary/20">
-            <p className="text-sm font-medium text-primary">
-              ✨ Teste Pré-configurado: Clique em "Play" na consulta "Márcia Gabriela - TJSP" para executar uma busca real na ComunicaAPI (20-25/12/2025).
-            </p>
-          </div>
-        </div>
       </div>
     </AppLayout>
   );

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,82 +36,11 @@ import {
   CheckCircle,
   Clock,
   AlertCircle,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-
-interface Documento {
-  id: string;
-  nome: string;
-  tipo: "pdf" | "docx" | "caderno";
-  tribunal?: string;
-  data: string;
-  tamanho: string;
-  status: "processado" | "processando" | "erro";
-  tags: string[];
-  origem: "upload" | "dje";
-}
-
-const documentos: Documento[] = [
-  {
-    id: "1",
-    nome: "TJSP_25-12-2025_Judicial.pdf",
-    tipo: "caderno",
-    tribunal: "TJSP",
-    data: "25/12/2025",
-    tamanho: "45.2 MB",
-    status: "processado",
-    tags: ["judicial", "dezembro-2025"],
-    origem: "dje",
-  },
-  {
-    id: "2",
-    nome: "Petição Inicial - Processo 1234567.pdf",
-    tipo: "pdf",
-    data: "24/12/2025",
-    tamanho: "2.3 MB",
-    status: "processado",
-    tags: ["petição", "cliente-abc"],
-    origem: "upload",
-  },
-  {
-    id: "3",
-    nome: "Sentença - Caso XYZ.docx",
-    tipo: "docx",
-    data: "23/12/2025",
-    tamanho: "1.1 MB",
-    status: "processando",
-    tags: ["sentença"],
-    origem: "upload",
-  },
-  {
-    id: "4",
-    nome: "TRF3_24-12-2025_Judicial.pdf",
-    tipo: "caderno",
-    tribunal: "TRF3",
-    data: "24/12/2025",
-    tamanho: "32.1 MB",
-    status: "processado",
-    tags: ["judicial", "dezembro-2025"],
-    origem: "dje",
-  },
-  {
-    id: "5",
-    nome: "Recurso Ordinário.pdf",
-    tipo: "pdf",
-    data: "22/12/2025",
-    tamanho: "5.4 MB",
-    status: "erro",
-    tags: ["recurso"],
-    origem: "upload",
-  },
-];
-
-const pastas = [
-  { nome: "Cadernos DJE", count: 847, icon: Folder },
-  { nome: "Uploads Manuais", count: 156, icon: Upload },
-  { nome: "Favoritos", count: 23, icon: Tag },
-];
+import { getDocumentos, getDocumentosStats, Documento } from "@/lib/database";
 
 const statusConfig = {
   processado: {
@@ -124,6 +53,11 @@ const statusConfig = {
     icon: Clock,
     class: "bg-primary/10 text-primary",
   },
+  pendente: {
+    label: "Pendente",
+    icon: Clock,
+    class: "bg-warning/10 text-warning",
+  },
   erro: {
     label: "Erro",
     icon: AlertCircle,
@@ -135,12 +69,34 @@ export default function Documentos() {
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [documentos, setDocumentos] = useState<Documento[]>([]);
+  const [stats, setStats] = useState({ cadernos: 0, uploads: 0, favoritos: 0 });
   const { toast } = useToast();
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    try {
+      const [docs, statsData] = await Promise.all([
+        getDocumentos(),
+        getDocumentosStats(),
+      ]);
+      setDocumentos(docs);
+      setStats(statsData);
+    } catch (error) {
+      console.error("Erro ao carregar documentos:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleUpload = () => {
     toast({
-      title: "Upload iniciado",
-      description: "Selecione os arquivos para fazer upload.",
+      title: "Upload",
+      description: "Funcionalidade de upload em desenvolvimento.",
     });
   };
 
@@ -157,6 +113,43 @@ export default function Documentos() {
       setSelectedDocs(documentos.map((d) => d.id));
     }
   };
+
+  const formatBytes = (bytes?: number) => {
+    if (!bytes) return "-";
+    const mb = bytes / (1024 * 1024);
+    if (mb >= 1) return `${mb.toFixed(1)} MB`;
+    const kb = bytes / 1024;
+    return `${kb.toFixed(0)} KB`;
+  };
+
+  const formatDate = (dateStr: string) => {
+    return new Date(dateStr).toLocaleDateString("pt-BR");
+  };
+
+  const filteredDocs = documentos.filter(d =>
+    d.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    d.tribunal?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    d.tags.some(t => t.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
+
+  const pastas = [
+    { nome: "Cadernos DJE", count: stats.cadernos, icon: Folder },
+    { nome: "Uploads Manuais", count: stats.uploads, icon: Upload },
+    { nome: "Favoritos", count: stats.favoritos, icon: Tag },
+  ];
+
+  if (loading) {
+    return (
+      <AppLayout
+        title="Documentos"
+        subtitle="Gerencie todos os documentos do sistema RAG"
+      >
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout
@@ -256,7 +249,7 @@ export default function Documentos() {
               <TableRow>
                 <TableHead className="w-12">
                   <Checkbox
-                    checked={selectedDocs.length === documentos.length}
+                    checked={selectedDocs.length === documentos.length && documentos.length > 0}
                     onCheckedChange={toggleSelectAll}
                   />
                 </TableHead>
@@ -270,110 +263,124 @@ export default function Documentos() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {documentos.map((doc) => {
-                const status = statusConfig[doc.status];
-                const StatusIcon = status.icon;
-                return (
-                  <TableRow key={doc.id}>
-                    <TableCell>
-                      <Checkbox
-                        checked={selectedDocs.includes(doc.id)}
-                        onCheckedChange={() => toggleSelectDoc(doc.id)}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={cn(
-                            "rounded-lg p-2",
-                            doc.tipo === "caderno"
-                              ? "bg-primary/10"
-                              : "bg-muted"
-                          )}
-                        >
-                          {doc.tipo === "caderno" ? (
-                            <FileText className="h-4 w-4 text-primary" />
-                          ) : (
-                            <File className="h-4 w-4 text-muted-foreground" />
-                          )}
-                        </div>
-                        <div>
-                          <p className="font-medium text-sm">{doc.nome}</p>
-                          {doc.tribunal && (
-                            <p className="text-xs text-muted-foreground">
-                              {doc.tribunal}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">
-                        {doc.tipo === "caderno"
-                          ? "Caderno DJE"
-                          : doc.tipo.toUpperCase()}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {doc.data}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {doc.tamanho}
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={status.class}>
-                        <StatusIcon className="mr-1 h-3 w-3" />
-                        {status.label}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {doc.tags.slice(0, 2).map((tag) => (
-                          <Badge
-                            key={tag}
-                            variant="outline"
-                            className="text-xs"
+              {filteredDocs.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center py-12">
+                    <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                    <p className="text-muted-foreground">
+                      {documentos.length === 0 
+                        ? "Nenhum documento no sistema. Faça upload ou baixe cadernos do DJE."
+                        : "Nenhum documento corresponde à busca."
+                      }
+                    </p>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filteredDocs.map((doc) => {
+                  const status = statusConfig[doc.status as keyof typeof statusConfig] || statusConfig.pendente;
+                  const StatusIcon = status.icon;
+                  return (
+                    <TableRow key={doc.id}>
+                      <TableCell>
+                        <Checkbox
+                          checked={selectedDocs.includes(doc.id)}
+                          onCheckedChange={() => toggleSelectDoc(doc.id)}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={cn(
+                              "rounded-lg p-2",
+                              doc.origem === "dje"
+                                ? "bg-primary/10"
+                                : "bg-muted"
+                            )}
                           >
-                            {tag}
-                          </Badge>
-                        ))}
-                        {doc.tags.length > 2 && (
-                          <Badge variant="outline" className="text-xs">
-                            +{doc.tags.length - 2}
-                          </Badge>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem>
-                            <Eye className="mr-2 h-4 w-4" />
-                            Visualizar
-                          </DropdownMenuItem>
-                          <DropdownMenuItem>
-                            <Download className="mr-2 h-4 w-4" />
-                            Download
-                          </DropdownMenuItem>
-                          <DropdownMenuItem>
-                            <RefreshCw className="mr-2 h-4 w-4" />
-                            Reprocessar
-                          </DropdownMenuItem>
-                          <DropdownMenuItem className="text-destructive">
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Excluir
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+                            {doc.origem === "dje" ? (
+                              <FileText className="h-4 w-4 text-primary" />
+                            ) : (
+                              <File className="h-4 w-4 text-muted-foreground" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="font-medium text-sm">{doc.nome}</p>
+                            {doc.tribunal && (
+                              <p className="text-xs text-muted-foreground">
+                                {doc.tribunal}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">
+                          {doc.origem === "dje"
+                            ? "Caderno DJE"
+                            : doc.tipo.toUpperCase()}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatDate(doc.created_at)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatBytes(doc.tamanho_bytes)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={status.class}>
+                          <StatusIcon className="mr-1 h-3 w-3" />
+                          {status.label}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {doc.tags.slice(0, 2).map((tag) => (
+                            <Badge
+                              key={tag}
+                              variant="outline"
+                              className="text-xs"
+                            >
+                              {tag}
+                            </Badge>
+                          ))}
+                          {doc.tags.length > 2 && (
+                            <Badge variant="outline" className="text-xs">
+                              +{doc.tags.length - 2}
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem>
+                              <Eye className="mr-2 h-4 w-4" />
+                              Visualizar
+                            </DropdownMenuItem>
+                            <DropdownMenuItem>
+                              <Download className="mr-2 h-4 w-4" />
+                              Download
+                            </DropdownMenuItem>
+                            <DropdownMenuItem>
+                              <RefreshCw className="mr-2 h-4 w-4" />
+                              Reprocessar
+                            </DropdownMenuItem>
+                            <DropdownMenuItem className="text-destructive">
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Excluir
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
             </TableBody>
           </Table>
         </div>

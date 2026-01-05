@@ -1,10 +1,63 @@
+import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { StatsCard } from "@/components/dashboard/StatsCard";
 import { RecentActivity } from "@/components/dashboard/RecentActivity";
 import { QuickActions } from "@/components/dashboard/QuickActions";
 import { FileText, Search, Database, MessageSquare } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+
+interface DashboardStats {
+  consultasAtivas: number;
+  cadernosProcessados: number;
+  documentosRag: number;
+  conversas: number;
+  resultadosNaoVisualizados: number;
+}
 
 export default function Dashboard() {
+  const [stats, setStats] = useState<DashboardStats>({
+    consultasAtivas: 0,
+    cadernosProcessados: 0,
+    documentosRag: 0,
+    conversas: 0,
+    resultadosNaoVisualizados: 0,
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadStats();
+  }, []);
+
+  const loadStats = async () => {
+    try {
+      const [
+        { count: consultasAtivas },
+        { count: cadernosProcessados },
+        { count: documentosRag },
+        { count: conversas },
+        { count: resultadosNaoVisualizados },
+      ] = await Promise.all([
+        supabase.from('consultas').select('*', { count: 'exact', head: true }).eq('ativo', true),
+        supabase.from('cadernos').select('*', { count: 'exact', head: true }).eq('status', 'sucesso'),
+        supabase.from('documentos').select('*', { count: 'exact', head: true }),
+        supabase.from('conversas').select('*', { count: 'exact', head: true }),
+        supabase.from('resultados_consultas').select('*', { count: 'exact', head: true }).eq('visualizado', false),
+      ]);
+
+      setStats({
+        consultasAtivas: consultasAtivas || 0,
+        cadernosProcessados: cadernosProcessados || 0,
+        documentosRag: documentosRag || 0,
+        conversas: conversas || 0,
+        resultadosNaoVisualizados: resultadosNaoVisualizados || 0,
+      });
+    } catch (error) {
+      console.error("Erro ao carregar estatísticas:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <AppLayout
       title="Dashboard"
@@ -15,34 +68,34 @@ export default function Dashboard() {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <StatsCard
             title="Consultas Ativas"
-            value={12}
-            description="8 agendadas para hoje"
+            value={loading ? "..." : stats.consultasAtivas}
+            description={stats.resultadosNaoVisualizados > 0 
+              ? `${stats.resultadosNaoVisualizados} resultado(s) novo(s)`
+              : "Monitorando intimações"
+            }
             icon={Search}
             variant="primary"
-            trend={{ value: 15, isPositive: true }}
           />
           <StatsCard
             title="Cadernos Processados"
-            value={847}
-            description="Últimos 30 dias"
+            value={loading ? "..." : stats.cadernosProcessados}
+            description="Downloads do DJE"
             icon={FileText}
             variant="success"
-            trend={{ value: 8, isPositive: true }}
           />
           <StatsCard
             title="Documentos no RAG"
-            value="2.4k"
-            description="156 GB de dados"
+            value={loading ? "..." : stats.documentosRag}
+            description="Sistema de busca inteligente"
             icon={Database}
             variant="default"
           />
           <StatsCard
             title="Conversas IA"
-            value={342}
-            description="Neste mês"
+            value={loading ? "..." : stats.conversas}
+            description="Chat com assistente jurídico"
             icon={MessageSquare}
             variant="default"
-            trend={{ value: 23, isPositive: true }}
           />
         </div>
 
@@ -63,7 +116,7 @@ export default function Dashboard() {
               <h3 className="text-lg font-semibold">Sistema Operacional</h3>
               <p className="mt-1 text-sm text-primary-foreground/80">
                 Todas as integrações com a ComunicaAPI estão funcionando
-                normalmente. Última sincronização: há 5 minutos.
+                normalmente. Sistema RAG ativo com Google Gemini.
               </p>
             </div>
             <div className="flex items-center gap-2">
