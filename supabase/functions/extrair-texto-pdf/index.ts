@@ -9,6 +9,8 @@ const corsHeaders = {
 interface ExtrairRequest {
   documento_id?: string;
   url_arquivo?: string;
+  /** PDF em base64 (quando não há url_arquivo) */
+  pdf_base64?: string;
   metodo: 'pdf-parse' | 'document-ai' | 'tesseract';
   processar_rag?: boolean;
 }
@@ -132,7 +134,7 @@ serve(async (req) => {
     console.log(`Usuário autenticado: ${user.email}`);
 
     const body: ExtrairRequest = await req.json();
-    const { documento_id, url_arquivo, metodo, processar_rag = true } = body;
+    const { documento_id, url_arquivo, pdf_base64, metodo, processar_rag = true } = body;
 
     console.log(`Extraindo texto com método: ${metodo}`);
 
@@ -140,8 +142,17 @@ serve(async (req) => {
     let textoExtraido = '';
     let docId = documento_id;
 
-    // Buscar documento do banco se ID fornecido
-    if (documento_id && !url_arquivo) {
+    // 1) Se veio PDF em base64, priorizar (não depende de url_arquivo)
+    if (pdf_base64) {
+      console.log('PDF recebido via base64');
+      const binary = atob(pdf_base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      pdfBytes = bytes;
+    }
+
+    // 2) Buscar documento do banco se ID fornecido (e ainda não temos bytes)
+    if (!pdfBytes && documento_id && !url_arquivo) {
       const { data: doc, error } = await supabaseClient
         .from('documentos')
         .select('url_arquivo, nome, conteudo_texto')
@@ -170,7 +181,7 @@ serve(async (req) => {
         const response = await fetch(doc.url_arquivo);
         pdfBytes = new Uint8Array(await response.arrayBuffer());
       }
-    } else if (url_arquivo) {
+    } else if (!pdfBytes && url_arquivo) {
       const response = await fetch(url_arquivo);
       pdfBytes = new Uint8Array(await response.arrayBuffer());
     }
