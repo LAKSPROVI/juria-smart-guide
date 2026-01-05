@@ -10,23 +10,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { 
-  Upload, 
-  X, 
-  FileText, 
-  CheckCircle, 
+import {
+  Upload,
+  X,
+  FileText,
+  CheckCircle,
   AlertCircle,
   Loader2,
-  Info
+  Info,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { createDocumento } from "@/lib/database";
 
 interface FileUpload {
   file: File;
   id: string;
-  status: 'pending' | 'uploading' | 'extracting' | 'processing' | 'done' | 'error';
+  status: "pending" | "uploading" | "extracting" | "processing" | "done" | "error";
   progress: number;
   error?: string;
   metodoOcr?: string;
@@ -36,26 +37,26 @@ interface UploadDocumentosProps {
   onUploadComplete?: () => void;
 }
 
-type MetodoOCR = 'pdf-parse' | 'document-ai' | 'tesseract';
+type MetodoOCR = "pdf-parse" | "document-ai" | "tesseract";
 
 const metodosOCR = [
   {
-    value: 'pdf-parse' as MetodoOCR,
-    label: 'PDF Digital (Grátis)',
-    description: 'Para PDFs com texto selecionável. Rápido e gratuito.',
-    icon: '📄',
+    value: "pdf-parse" as MetodoOCR,
+    label: "PDF Digital (Grátis)",
+    description: "Para PDFs com texto selecionável. Rápido e gratuito.",
+    icon: "📄",
   },
   {
-    value: 'document-ai' as MetodoOCR,
-    label: 'Google Document AI (OCR)',
-    description: 'Para PDFs digitalizados/escaneados. Requer API key.',
-    icon: '🔍',
+    value: "document-ai" as MetodoOCR,
+    label: "Google Document AI (OCR)",
+    description: "Para PDFs digitalizados/escaneados. Requer API key.",
+    icon: "🔍",
   },
   {
-    value: 'tesseract' as MetodoOCR,
-    label: 'Tesseract OCR (Offline)',
-    description: 'OCR offline. Mais lento, menor precisão.',
-    icon: '🖼️',
+    value: "tesseract" as MetodoOCR,
+    label: "Tesseract OCR (Offline)",
+    description: "OCR offline. Mais lento, menor precisão.",
+    icon: "🖼️",
     disabled: true,
   },
 ];
@@ -63,7 +64,7 @@ const metodosOCR = [
 export function UploadDocumentos({ onUploadComplete }: UploadDocumentosProps) {
   const [files, setFiles] = useState<FileUpload[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  const [metodoOcr, setMetodoOcr] = useState<MetodoOCR>('pdf-parse');
+  const [metodoOcr, setMetodoOcr] = useState<MetodoOCR>("pdf-parse");
   const { toast } = useToast();
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -76,173 +77,159 @@ export function UploadDocumentos({ onUploadComplete }: UploadDocumentosProps) {
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    
-    const droppedFiles = Array.from(e.dataTransfer.files).filter(
-      file => file.type === 'application/pdf' || 
-              file.type === 'text/plain' ||
-              file.name.endsWith('.txt') ||
-              file.type.startsWith('image/')
-    );
-    
-    addFiles(droppedFiles);
-  }, []);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
+
+      const droppedFiles = Array.from(e.dataTransfer.files).filter(
+        (file) =>
+          file.type === "application/pdf" ||
+          file.type === "text/plain" ||
+          file.name.endsWith(".txt") ||
+          file.type.startsWith("image/")
+      );
+
+      addFiles(droppedFiles);
+    },
+    [metodoOcr]
+  );
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(e.target.files || []);
     addFiles(selectedFiles);
-    e.target.value = '';
-  }, []);
+    e.target.value = "";
+  }, [metodoOcr]);
 
   const addFiles = (newFiles: File[]) => {
-    const fileUploads: FileUpload[] = newFiles.map(file => ({
+    const fileUploads: FileUpload[] = newFiles.map((file) => ({
       file,
       id: Math.random().toString(36).substr(2, 9),
-      status: 'pending',
+      status: "pending",
       progress: 0,
-      metodoOcr: file.type === 'application/pdf' ? metodoOcr : undefined,
+      metodoOcr: file.type === "application/pdf" ? metodoOcr : undefined,
     }));
-    
-    setFiles(prev => [...prev, ...fileUploads]);
+
+    setFiles((prev) => [...prev, ...fileUploads]);
   };
 
   const removeFile = (id: string) => {
-    setFiles(prev => prev.filter(f => f.id !== id));
+    setFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
   const updateFileStatus = (id: string, updates: Partial<FileUpload>) => {
-    setFiles(prev => prev.map(f => 
-      f.id === id ? { ...f, ...updates } : f
-    ));
+    setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, ...updates } : f)));
   };
 
   const setFileMetodo = (id: string, metodo: MetodoOCR) => {
-    setFiles(prev => prev.map(f => 
-      f.id === id ? { ...f, metodoOcr: metodo } : f
-    ));
+    setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, metodoOcr: metodo } : f)));
   };
 
   const processFile = async (fileUpload: FileUpload) => {
     const { file, id, metodoOcr: fileMetodo } = fileUpload;
-    
-    try {
-      updateFileStatus(id, { status: 'uploading', progress: 10 });
-      
-      // Criar registro do documento primeiro
-      const { data: documento, error: docError } = await supabase
-        .from('documentos')
-        .insert({
-          nome: file.name,
-          tipo: file.name.split('.').pop() || 'txt',
-          origem: 'upload',
-          tamanho_bytes: file.size,
-          status: 'processando',
-          conteudo_texto: null, // Será preenchido depois
-        })
-        .select()
-        .single();
 
-      if (docError) throw docError;
+    try {
+      updateFileStatus(id, { status: "uploading", progress: 10 });
+
+      // Criar registro do documento (inclui user_id via helper)
+      const documento = await createDocumento({
+        nome: file.name,
+        tipo: file.name.split(".").pop() || "txt",
+        origem: "upload",
+        tamanho_bytes: file.size,
+        status: "processando",
+        tags: [],
+        embedding_processado: false,
+      });
 
       updateFileStatus(id, { progress: 30 });
 
-      let texto = '';
-      
-      if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
+      let texto = "";
+
+      if (file.type === "text/plain" || file.name.endsWith(".txt")) {
         // Arquivos de texto: extrair diretamente
         texto = await file.text();
-        
-        // Atualizar documento com texto
-        await supabase
-          .from('documentos')
-          .update({ conteudo_texto: texto })
-          .eq('id', documento.id);
 
-      } else if (file.type === 'application/pdf') {
-        // PDFs: usar método escolhido
-        const metodo = fileMetodo || 'pdf-parse';
-        
-        updateFileStatus(id, { status: 'extracting', progress: 40 });
+        await supabase.from("documentos").update({ conteudo_texto: texto }).eq("id", documento.id);
+      } else if (file.type === "application/pdf") {
+        const metodo = fileMetodo || "pdf-parse";
+
+        updateFileStatus(id, { status: "extracting", progress: 40 });
 
         toast({
           title: `Extraindo texto (${metodo})`,
           description: `Processando ${file.name}...`,
         });
 
-        // Converter arquivo para base64 para enviar ao backend
         const arrayBuffer = await file.arrayBuffer();
         const base64 = btoa(
-          new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+          new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
         );
 
-        // Para PDFs grandes, vamos primeiro fazer upload para storage
-        // Por agora, chamar extração direto
-        const { data: extracaoResult, error: extracaoError } = await supabase.functions.invoke('extrair-texto-pdf', {
-          body: {
-            documento_id: documento.id,
-            metodo: metodo,
-            processar_rag: true,
+        const { data: extracaoResult, error: extracaoError } = await supabase.functions.invoke(
+          "extrair-texto-pdf",
+          {
+            body: {
+              documento_id: documento.id,
+              metodo,
+              processar_rag: true,
+              pdf_base64: base64,
+            },
           }
-        });
+        );
 
         if (extracaoError) {
-          console.error('Erro na extração:', extracaoError);
-          
-          // Se precisa OCR, informar usuário
+          console.error("Erro na extração:", extracaoError);
+
           if (extracaoResult?.precisa_ocr) {
             toast({
               variant: "destructive",
               title: "PDF digitalizado detectado",
-              description: "Este PDF requer OCR. Selecione 'Google Document AI' e configure a API key.",
+              description:
+                "Este PDF requer OCR. Selecione 'Google Document AI' e configure a API key.",
             });
           }
         }
 
-        texto = extracaoResult?.texto || '';
+        texto = extracaoResult?.texto || "";
       }
 
-      updateFileStatus(id, { status: 'processing', progress: 70 });
+      updateFileStatus(id, { status: "processing", progress: 70 });
 
-      // Adicionar à fila de processamento RAG se tem texto
+      // Se extraiu texto suficiente, adiciona na fila + dispara processamento
       if (texto.length > 100) {
-        await supabase
-          .from('fila_processamento_rag')
-          .insert({
-            documento_id: documento.id,
-            prioridade: 5,
-            status: 'pendente',
-          });
+        await supabase.from("fila_processamento_rag").insert({
+          documento_id: documento.id,
+          prioridade: 5,
+          status: "pendente",
+        });
 
-        // Chamar função de processamento RAG
-        const { error: procError } = await supabase.functions.invoke('processar-documento-rag', {
+        const { error: procError } = await supabase.functions.invoke("processar-documento-rag", {
           body: {
             documento_id: documento.id,
-            texto: texto,
+            texto,
             titulo: file.name,
-          }
+          },
         });
 
         if (procError) {
-          console.error('Erro ao processar RAG:', procError);
+          console.error("Erro ao processar RAG:", procError);
         }
       }
 
-      updateFileStatus(id, { status: 'done', progress: 100 });
+      updateFileStatus(id, { status: "done", progress: 100 });
 
       toast({
         title: "Upload concluído",
         description: `${file.name} processado com sucesso.`,
       });
-
     } catch (error) {
-      console.error('Erro no upload:', error);
-      updateFileStatus(id, { 
-        status: 'error', 
-        error: error instanceof Error ? error.message : 'Erro desconhecido'
+      console.error("Erro no upload:", error);
+      updateFileStatus(id, {
+        status: "error",
+        error: error instanceof Error ? error.message : "Erro desconhecido",
       });
-      
+
       toast({
         variant: "destructive",
         title: "Erro no upload",
