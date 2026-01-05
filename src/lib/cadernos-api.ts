@@ -50,13 +50,20 @@ export async function baixarCadernoDJE(params: CadernoDownloadParams): Promise<C
     }
     
     // Tentar baixar do navegador (pode falhar por CORS)
+    // A API do PJe geralmente permite chamadas diretas do navegador no Brasil
     try {
+      console.log("Tentando baixar caderno diretamente do navegador:", url);
+      
       const response = await fetch(url, {
         method: 'GET',
         headers: {
           'Accept': 'application/json, text/html, */*',
+          'Cache-Control': 'no-cache',
         },
+        // Sem mode específico para permitir que o navegador faça a requisição normalmente
       });
+      
+      console.log("Resposta do navegador:", response.status, response.ok);
       
       if (!response.ok) {
         if (response.status === 404) {
