@@ -40,9 +40,10 @@ import {
   Loader2,
   FileText,
   History,
+  RefreshCw,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { consultarIntimacoes, IntimacaoResult } from "@/lib/api";
+import { consultarIntimacoes, forcarAtualizacaoConsulta, IntimacaoResult } from "@/lib/api";
 import { 
   getConsultas, 
   createConsulta, 
@@ -127,17 +128,18 @@ export default function Consultas() {
     }
   };
 
-  const handleExecutar = async (consulta: Consulta) => {
+  const handleExecutar = async (consulta: Consulta, forcarAtualizacao = false) => {
     setLoading(true);
     setConsultaAtual(consulta);
     
     try {
       toast({
-        title: "Executando consulta...",
+        title: forcarAtualizacao ? "Forçando atualização..." : "Executando consulta...",
         description: `Buscando intimações para "${consulta.termo}"`,
       });
 
-      const response = await consultarIntimacoes({
+      const consultaFn = forcarAtualizacao ? forcarAtualizacaoConsulta : consultarIntimacoes;
+      const response = await consultaFn({
         termo: consulta.termo,
         numeroOab: consulta.numero_oab,
         ufOab: consulta.uf_oab,
@@ -153,8 +155,8 @@ export default function Consultas() {
         setResultados(data);
         setResultadosOpen(true);
         
-        // Salvar resultados no banco apenas se houver dados
-        if (data.length > 0) {
+        // Salvar resultados no banco apenas se houver dados e não for do cache
+        if (data.length > 0 && !response.fromCache) {
           await saveResultados(consulta.id, data);
         }
         
@@ -166,9 +168,10 @@ export default function Consultas() {
         await loadConsultas();
 
         if (data.length > 0) {
+          const cacheInfo = response.fromCache ? " (do cache)" : "";
           toast({
-            title: "Consulta executada com sucesso!",
-            description: `${data.length} intimação(ões) encontrada(s) e salva(s).`,
+            title: `Consulta executada com sucesso!${cacheInfo}`,
+            description: response.message || `${data.length} intimação(ões) encontrada(s).`,
           });
         } else {
           toast({
@@ -610,19 +613,28 @@ export default function Consultas() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-1">
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => handleExecutar(consulta)}
+                            onClick={() => handleExecutar(consulta, false)}
                             disabled={loading}
-                            title="Executar consulta"
+                            title="Executar consulta (usa cache)"
                           >
                             {loading && consultaAtual?.id === consulta.id ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
                               <Play className="h-4 w-4" />
                             )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleExecutar(consulta, true)}
+                            disabled={loading}
+                            title="Forçar atualização (ignora cache)"
+                          >
+                            <RefreshCw className="h-4 w-4" />
                           </Button>
                           <Button 
                             variant="ghost" 
