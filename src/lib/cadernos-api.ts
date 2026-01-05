@@ -151,11 +151,14 @@ export async function baixarCadernoDJE(params: CadernoDownloadParams): Promise<C
       });
       
       if (edgeError || !edgeResult?.success) {
+        const errorMessage = edgeError?.message || edgeResult?.error || 'Erro desconhecido';
+        const suggestion = edgeResult?.suggestion || '';
+        
         await supabase
           .from('cadernos')
           .update({ 
             status: 'erro', 
-            erro_mensagem: edgeError?.message || edgeResult?.error || 'Erro desconhecido' 
+            erro_mensagem: errorMessage
           })
           .eq('id', caderno.id);
         
@@ -164,16 +167,16 @@ export async function baixarCadernoDJE(params: CadernoDownloadParams): Promise<C
           acao: 'download',
           entidade_tipo: 'caderno',
           entidade_id: caderno.id,
-          detalhes: { tribunal: params.tribunal, data: params.data, tipo: params.tipo },
+          detalhes: { tribunal: params.tribunal, data: params.data, tipo: params.tipo, httpStatus: edgeResult?.httpStatus },
           status: 'erro',
-          erro_mensagem: edgeError?.message || edgeResult?.error,
+          erro_mensagem: errorMessage,
           duracao_ms: Date.now() - inicio,
         });
         
         return {
           success: false,
           cadernoId: caderno.id,
-          error: edgeError?.message || edgeResult?.error || 'Erro ao baixar caderno',
+          error: suggestion ? `${errorMessage}. ${suggestion}` : errorMessage,
         };
       }
       
