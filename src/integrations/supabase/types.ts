@@ -14,7 +14,353 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      cadernos: {
+        Row: {
+          created_at: string
+          data: string
+          erro_mensagem: string | null
+          id: string
+          processado_rag: boolean | null
+          status: string
+          tamanho_bytes: number | null
+          tipo: string
+          total_publicacoes: number | null
+          tribunal: string
+          updated_at: string
+          url_arquivo: string | null
+        }
+        Insert: {
+          created_at?: string
+          data: string
+          erro_mensagem?: string | null
+          id?: string
+          processado_rag?: boolean | null
+          status?: string
+          tamanho_bytes?: number | null
+          tipo: string
+          total_publicacoes?: number | null
+          tribunal: string
+          updated_at?: string
+          url_arquivo?: string | null
+        }
+        Update: {
+          created_at?: string
+          data?: string
+          erro_mensagem?: string | null
+          id?: string
+          processado_rag?: boolean | null
+          status?: string
+          tamanho_bytes?: number | null
+          tipo?: string
+          total_publicacoes?: number | null
+          tribunal?: string
+          updated_at?: string
+          url_arquivo?: string | null
+        }
+        Relationships: []
+      }
+      config_cadernos: {
+        Row: {
+          ativo: boolean | null
+          created_at: string
+          horarios: string[] | null
+          id: string
+          processar_automaticamente: boolean | null
+          tipos: string[] | null
+          tribunal: string
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean | null
+          created_at?: string
+          horarios?: string[] | null
+          id?: string
+          processar_automaticamente?: boolean | null
+          tipos?: string[] | null
+          tribunal: string
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean | null
+          created_at?: string
+          horarios?: string[] | null
+          id?: string
+          processar_automaticamente?: boolean | null
+          tipos?: string[] | null
+          tribunal?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      consultas: {
+        Row: {
+          ativo: boolean | null
+          created_at: string
+          data_final: string | null
+          data_inicial: string | null
+          horarios: string[] | null
+          id: string
+          nome: string
+          numero_oab: string | null
+          recorrencia: string
+          termo: string
+          tipo: string
+          tribunal: string
+          uf_oab: string | null
+          ultima_execucao: string | null
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean | null
+          created_at?: string
+          data_final?: string | null
+          data_inicial?: string | null
+          horarios?: string[] | null
+          id?: string
+          nome: string
+          numero_oab?: string | null
+          recorrencia?: string
+          termo: string
+          tipo: string
+          tribunal: string
+          uf_oab?: string | null
+          ultima_execucao?: string | null
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean | null
+          created_at?: string
+          data_final?: string | null
+          data_inicial?: string | null
+          horarios?: string[] | null
+          id?: string
+          nome?: string
+          numero_oab?: string | null
+          recorrencia?: string
+          termo?: string
+          tipo?: string
+          tribunal?: string
+          uf_oab?: string | null
+          ultima_execucao?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      conversas: {
+        Row: {
+          created_at: string
+          id: string
+          titulo: string
+          ultima_mensagem: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          titulo: string
+          ultima_mensagem?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          titulo?: string
+          ultima_mensagem?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      documento_chunks: {
+        Row: {
+          chunk_index: number
+          conteudo: string
+          created_at: string
+          documento_id: string | null
+          id: string
+          metadata: Json | null
+          numero_processo: string | null
+        }
+        Insert: {
+          chunk_index: number
+          conteudo: string
+          created_at?: string
+          documento_id?: string | null
+          id?: string
+          metadata?: Json | null
+          numero_processo?: string | null
+        }
+        Update: {
+          chunk_index?: number
+          conteudo?: string
+          created_at?: string
+          documento_id?: string | null
+          id?: string
+          metadata?: Json | null
+          numero_processo?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "documento_chunks_documento_id_fkey"
+            columns: ["documento_id"]
+            isOneToOne: false
+            referencedRelation: "documentos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      documentos: {
+        Row: {
+          caderno_id: string | null
+          conteudo_texto: string | null
+          created_at: string
+          embedding_processado: boolean | null
+          erro_mensagem: string | null
+          id: string
+          nome: string
+          origem: string
+          status: string
+          tags: string[] | null
+          tamanho_bytes: number | null
+          tipo: string
+          tribunal: string | null
+          updated_at: string
+          url_arquivo: string | null
+        }
+        Insert: {
+          caderno_id?: string | null
+          conteudo_texto?: string | null
+          created_at?: string
+          embedding_processado?: boolean | null
+          erro_mensagem?: string | null
+          id?: string
+          nome: string
+          origem?: string
+          status?: string
+          tags?: string[] | null
+          tamanho_bytes?: number | null
+          tipo: string
+          tribunal?: string | null
+          updated_at?: string
+          url_arquivo?: string | null
+        }
+        Update: {
+          caderno_id?: string | null
+          conteudo_texto?: string | null
+          created_at?: string
+          embedding_processado?: boolean | null
+          erro_mensagem?: string | null
+          id?: string
+          nome?: string
+          origem?: string
+          status?: string
+          tags?: string[] | null
+          tamanho_bytes?: number | null
+          tipo?: string
+          tribunal?: string | null
+          updated_at?: string
+          url_arquivo?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "documentos_caderno_id_fkey"
+            columns: ["caderno_id"]
+            isOneToOne: false
+            referencedRelation: "cadernos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mensagens: {
+        Row: {
+          content: string
+          conversa_id: string | null
+          created_at: string
+          fontes: Json | null
+          id: string
+          role: string
+        }
+        Insert: {
+          content: string
+          conversa_id?: string | null
+          created_at?: string
+          fontes?: Json | null
+          id?: string
+          role: string
+        }
+        Update: {
+          content?: string
+          conversa_id?: string | null
+          created_at?: string
+          fontes?: Json | null
+          id?: string
+          role?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mensagens_conversa_id_fkey"
+            columns: ["conversa_id"]
+            isOneToOne: false
+            referencedRelation: "conversas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      resultados_consultas: {
+        Row: {
+          consulta_id: string | null
+          created_at: string
+          dados_completos: Json | null
+          data_disponibilizacao: string | null
+          data_publicacao: string | null
+          destinatarios: Json | null
+          id: string
+          nome_orgao: string | null
+          numero_processo: string | null
+          sigla_tribunal: string | null
+          texto_mensagem: string | null
+          tipo_comunicacao: string | null
+          visualizado: boolean | null
+        }
+        Insert: {
+          consulta_id?: string | null
+          created_at?: string
+          dados_completos?: Json | null
+          data_disponibilizacao?: string | null
+          data_publicacao?: string | null
+          destinatarios?: Json | null
+          id?: string
+          nome_orgao?: string | null
+          numero_processo?: string | null
+          sigla_tribunal?: string | null
+          texto_mensagem?: string | null
+          tipo_comunicacao?: string | null
+          visualizado?: boolean | null
+        }
+        Update: {
+          consulta_id?: string | null
+          created_at?: string
+          dados_completos?: Json | null
+          data_disponibilizacao?: string | null
+          data_publicacao?: string | null
+          destinatarios?: Json | null
+          id?: string
+          nome_orgao?: string | null
+          numero_processo?: string | null
+          sigla_tribunal?: string | null
+          texto_mensagem?: string | null
+          tipo_comunicacao?: string | null
+          visualizado?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "resultados_consultas_consulta_id_fkey"
+            columns: ["consulta_id"]
+            isOneToOne: false
+            referencedRelation: "consultas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
