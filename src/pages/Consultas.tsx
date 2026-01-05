@@ -149,11 +149,11 @@ export default function Consultas() {
       console.log("Resposta da API:", response);
 
       if (response.success) {
-        const data = Array.isArray(response.data) ? response.data : [response.data];
+        const data = Array.isArray(response.data) ? response.data : [];
         setResultados(data);
         setResultadosOpen(true);
         
-        // Salvar resultados no banco
+        // Salvar resultados no banco apenas se houver dados
         if (data.length > 0) {
           await saveResultados(consulta.id, data);
         }
@@ -165,14 +165,21 @@ export default function Consultas() {
         
         await loadConsultas();
 
-        toast({
-          title: "Consulta executada com sucesso!",
-          description: `${data.length} intimação(ões) encontrada(s) e salva(s).`,
-        });
+        if (data.length > 0) {
+          toast({
+            title: "Consulta executada com sucesso!",
+            description: `${data.length} intimação(ões) encontrada(s) e salva(s).`,
+          });
+        } else {
+          toast({
+            title: "Consulta executada",
+            description: response.message || "Nenhuma intimação encontrada para os critérios informados.",
+          });
+        }
       } else {
         toast({
-          title: "Nenhum resultado",
-          description: response.error || "A consulta não retornou resultados.",
+          title: "Erro na consulta",
+          description: response.error || "Não foi possível executar a consulta.",
           variant: "destructive",
         });
       }

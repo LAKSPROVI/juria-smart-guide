@@ -33,6 +33,7 @@ export interface ConsultaResponse {
   parametros: ConsultaParams;
   total: number;
   error?: string;
+  message?: string;
 }
 
 export async function consultarIntimacoes(params: ConsultaParams): Promise<ConsultaResponse> {
