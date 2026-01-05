@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.executar-consultas-agendadas]
 verify_jwt = false
+
+[functions.baixar-caderno]
+verify_jwt = false

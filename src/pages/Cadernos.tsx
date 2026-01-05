@@ -22,6 +22,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Progress } from "@/components/ui/progress";
 import {
   Plus,
   Download,
@@ -43,6 +44,7 @@ import {
   Caderno 
 } from "@/lib/database";
 import { TribunalSelector, tribunaisDisponiveis as tribunaisLista } from "@/components/TribunalSelector";
+import { baixarCadernoDJE, getCadernosEmProcessamento } from "@/lib/cadernos-api";
 
 const horariosDisponiveis = [
   "18:00", "18:30", "19:00", "19:30", "20:00", "20:30", 
@@ -77,8 +79,10 @@ export default function Cadernos() {
   const [configOpen, setConfigOpen] = useState(false);
   const [selectedConfig, setSelectedConfig] = useState<ConfigCaderno | null>(null);
   const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
   const [configs, setConfigs] = useState<ConfigCaderno[]>([]);
   const [cadernos, setCadernos] = useState<Caderno[]>([]);
+  const [cadernosProcessando, setCadernosProcessando] = useState<Caderno[]>([]);
   const { toast } = useToast();
 
   // Form state for new config
@@ -94,7 +98,19 @@ export default function Cadernos() {
 
   useEffect(() => {
     loadData();
+    // Polling para cadernos em processamento
+    const interval = setInterval(loadCadernosProcessando, 5000);
+    return () => clearInterval(interval);
   }, []);
+
+  const loadCadernosProcessando = async () => {
+    try {
+      const data = await getCadernosEmProcessamento();
+      setCadernosProcessando(data);
+    } catch (error) {
+      console.error("Erro ao carregar cadernos em processamento:", error);
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -178,13 +194,61 @@ export default function Cadernos() {
     }
   };
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
+    if (!downloadTribunal || !downloadData) {
+      toast({
+        title: "Dados incompletos",
+        description: "Selecione o tribunal e a data.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setDownloading(true);
     setDownloadOpen(false);
+    
     toast({
       title: "Download iniciado",
-      description: "O caderno está sendo baixado e será processado automaticamente.",
+      description: `Baixando caderno ${downloadTribunal} de ${downloadData}...`,
     });
-    // Aqui seria implementada a chamada real para baixar o caderno
+    
+    try {
+      const result = await baixarCadernoDJE({
+        tribunal: downloadTribunal,
+        data: downloadData,
+        tipo: downloadTipo,
+        processarRag: downloadProcessar,
+      });
+      
+      if (result.success) {
+        toast({
+          title: "Caderno baixado com sucesso!",
+          description: result.message,
+        });
+      } else {
+        toast({
+          title: "Erro ao baixar caderno",
+          description: result.error,
+          variant: "destructive",
+        });
+      }
+      
+      // Recarregar dados
+      await loadData();
+      await loadCadernosProcessando();
+      
+    } catch (error) {
+      console.error("Erro ao baixar caderno:", error);
+      toast({
+        title: "Erro ao baixar caderno",
+        description: error instanceof Error ? error.message : "Erro desconhecido",
+        variant: "destructive",
+      });
+    } finally {
+      setDownloading(false);
+      setDownloadTribunal("");
+      setDownloadData("");
+    }
   };
 
   const toggleHorario = (horario: string, current: string[], setter: (h: string[]) => void) => {
@@ -459,14 +523,62 @@ export default function Cadernos() {
                 <Button variant="outline" onClick={() => setDownloadOpen(false)}>
                   Cancelar
                 </Button>
-                <Button onClick={handleDownload} disabled={!downloadTribunal || !downloadData}>
-                  <Download className="mr-2 h-4 w-4" />
-                  Iniciar Download
+                <Button onClick={handleDownload} disabled={!downloadTribunal || !downloadData || downloading}>
+                  {downloading ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="mr-2 h-4 w-4" />
+                  )}
+                  {downloading ? "Baixando..." : "Iniciar Download"}
                 </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
         </div>
+
+        {/* Downloads em Processamento */}
+        {(cadernosProcessando.length > 0 || downloading) && (
+          <Card className="shadow-card border-primary/20 bg-primary/5">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                Downloads em Processamento
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {downloading && (
+                  <div className="flex items-center justify-between p-3 bg-background rounded-lg border">
+                    <div className="flex items-center gap-3">
+                      <RefreshCw className="h-4 w-4 animate-spin text-primary" />
+                      <div>
+                        <p className="font-medium">{downloadTribunal || "Preparando..."}</p>
+                        <p className="text-sm text-muted-foreground">{downloadData}</p>
+                      </div>
+                    </div>
+                    <Badge className="bg-primary/10 text-primary">
+                      Baixando...
+                    </Badge>
+                  </div>
+                )}
+                {cadernosProcessando.map((caderno) => (
+                  <div key={caderno.id} className="flex items-center justify-between p-3 bg-background rounded-lg border">
+                    <div className="flex items-center gap-3">
+                      <RefreshCw className="h-4 w-4 animate-spin text-primary" />
+                      <div>
+                        <p className="font-medium">{caderno.tribunal}</p>
+                        <p className="text-sm text-muted-foreground">{formatDate(caderno.data)}</p>
+                      </div>
+                    </div>
+                    <Badge className="bg-primary/10 text-primary">
+                      Processando...
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Downloads Grid */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
