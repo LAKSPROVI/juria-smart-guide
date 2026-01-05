@@ -55,9 +55,24 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { useNavigate } from "react-router-dom";
 
+// Lista completa de tribunais do PJe/ComunicaAPI
 const tribunais = [
-  "TJSP", "TJRJ", "TJMG", "TRF1", "TRF2", "TRF3", "TRF4", "TRF5",
-  "TRT1", "TRT2", "TST", "STJ", "STF",
+  // Justiça Federal
+  "TRF1", "TRF2", "TRF3", "TRF4", "TRF5", "TRF6",
+  // Justiça do Trabalho
+  "TST", "TRT1", "TRT2", "TRT3", "TRT4", "TRT5", "TRT6", "TRT7", "TRT8", 
+  "TRT9", "TRT10", "TRT11", "TRT12", "TRT13", "TRT14", "TRT15", "TRT16", 
+  "TRT17", "TRT18", "TRT19", "TRT20", "TRT21", "TRT22", "TRT23", "TRT24",
+  // Justiça Estadual
+  "TJAP", "TJBA", "TJCE", "TJDFT", "TJES", "TJMA", "TJMG", "TJMT", 
+  "TJPA", "TJPB", "TJPE", "TJPI", "TJRJ", "TJRN", "TJRO", "TJSP",
+  // Justiça Eleitoral
+  "TSE", "TREAC", "TREAL", "TREAM", "TREAP", "TREBA", "TRECE", "TREDF",
+  "TREES", "TREGO", "TREMA", "TREMG", "TREMS", "TREMT", "TREPA", "TREPB",
+  "TREPE", "TREPI", "TREPR", "TRERJ", "TRERN", "TRERO", "TRERR", "TRERS",
+  "TRESC", "TRESE", "TRESP", "TRETO",
+  // Tribunais Superiores
+  "STJ", "STF",
 ];
 
 const horariosDisponiveis = [
@@ -68,12 +83,14 @@ const horariosDisponiveis = [
 
 export default function Consultas() {
   const [open, setOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [resultadosOpen, setResultadosOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingConsultas, setLoadingConsultas] = useState(true);
   const [resultados, setResultados] = useState<IntimacaoResult[]>([]);
   const [consultaAtual, setConsultaAtual] = useState<Consulta | null>(null);
+  const [editingConsulta, setEditingConsulta] = useState<Consulta | null>(null);
   const [consultas, setConsultas] = useState<Consulta[]>([]);
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -255,6 +272,69 @@ export default function Consultas() {
         variant: "destructive",
       });
     }
+  };
+
+  const handleEditConsulta = (consulta: Consulta) => {
+    setEditingConsulta(consulta);
+    setFormNome(consulta.nome);
+    setFormTribunal(consulta.tribunal);
+    setFormTipo(consulta.tipo);
+    setFormTermo(consulta.termo);
+    setFormNumeroOab(consulta.numero_oab || "");
+    setFormUfOab(consulta.uf_oab || "");
+    setFormDataInicio(consulta.data_inicial || "");
+    setFormDataFim(consulta.data_final || "");
+    setFormRecorrencia(consulta.recorrencia);
+    setFormHorarios(consulta.horarios || ["09:00"]);
+    setEditOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingConsulta) return;
+    
+    try {
+      await updateConsulta(editingConsulta.id, {
+        nome: formNome || `${formTermo} - ${formTribunal}`,
+        tribunal: formTribunal,
+        tipo: formTipo,
+        termo: formTermo,
+        numero_oab: formNumeroOab || undefined,
+        uf_oab: formUfOab || undefined,
+        data_inicial: formDataInicio || undefined,
+        data_final: formDataFim || undefined,
+        recorrencia: formRecorrencia,
+        horarios: formHorarios,
+      });
+
+      setEditOpen(false);
+      setEditingConsulta(null);
+      await loadConsultas();
+      resetForm();
+      
+      toast({
+        title: "Consulta atualizada",
+        description: "As alterações foram salvas com sucesso.",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro ao atualizar consulta",
+        description: error instanceof Error ? error.message : "Erro desconhecido",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const resetForm = () => {
+    setFormNome("");
+    setFormTribunal("");
+    setFormTipo("");
+    setFormTermo("");
+    setFormNumeroOab("");
+    setFormUfOab("");
+    setFormDataInicio("");
+    setFormDataFim("");
+    setFormRecorrencia("manual");
+    setFormHorarios(["09:00"]);
   };
 
   const formatRecorrencia = (consulta: Consulta) => {
@@ -537,7 +617,12 @@ export default function Consultas() {
                               <Play className="h-4 w-4" />
                             )}
                           </Button>
-                          <Button variant="ghost" size="icon" title="Editar">
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            title="Editar"
+                            onClick={() => handleEditConsulta(consulta)}
+                          >
                             <Pencil className="h-4 w-4" />
                           </Button>
                           <Button 
@@ -628,6 +713,166 @@ export default function Consultas() {
               </Button>
               <Button onClick={() => navigate("/resultados")}>
                 Ver Todo Histórico
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Dialog */}
+        <Dialog open={editOpen} onOpenChange={(open) => {
+          setEditOpen(open);
+          if (!open) {
+            setEditingConsulta(null);
+            resetForm();
+          }
+        }}>
+          <DialogContent className="sm:max-w-[600px]">
+            <DialogHeader>
+              <DialogTitle>Editar Consulta</DialogTitle>
+              <DialogDescription>
+                Altere as configurações da consulta "{editingConsulta?.nome}".
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4 max-h-[60vh] overflow-y-auto">
+              <div className="grid gap-2">
+                <Label htmlFor="edit-nome">Nome da Consulta</Label>
+                <Input
+                  id="edit-nome"
+                  placeholder="Ex: Márcia Gabriela - TJSP"
+                  value={formNome}
+                  onChange={(e) => setFormNome(e.target.value)}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label>Tribunal</Label>
+                  <Select value={formTribunal} onValueChange={setFormTribunal}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {tribunais.map((t) => (
+                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Tipo de Busca</Label>
+                  <Select value={formTipo} onValueChange={setFormTipo}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="nome_advogado">Nome Advogado</SelectItem>
+                      <SelectItem value="oab">Número OAB</SelectItem>
+                      <SelectItem value="processo">Número Processo</SelectItem>
+                      <SelectItem value="parte">Nome Parte</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              
+              <div className="grid gap-2">
+                <Label htmlFor="edit-termo">Termo de Busca</Label>
+                <Input
+                  id="edit-termo"
+                  placeholder="Ex: Márcia Gabriela de Abreu"
+                  value={formTermo}
+                  onChange={(e) => setFormTermo(e.target.value)}
+                />
+              </div>
+
+              {formTipo === "oab" && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-numeroOab">Número OAB</Label>
+                    <Input
+                      id="edit-numeroOab"
+                      placeholder="Ex: 123456"
+                      value={formNumeroOab}
+                      onChange={(e) => setFormNumeroOab(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit-ufOab">UF OAB</Label>
+                    <Input
+                      id="edit-ufOab"
+                      placeholder="Ex: SP"
+                      value={formUfOab}
+                      onChange={(e) => setFormUfOab(e.target.value.toUpperCase())}
+                      maxLength={2}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-dataInicio">Data Inicial</Label>
+                  <Input 
+                    id="edit-dataInicio" 
+                    type="date" 
+                    value={formDataInicio}
+                    onChange={(e) => setFormDataInicio(e.target.value)}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-dataFim">Data Final</Label>
+                  <Input 
+                    id="edit-dataFim" 
+                    type="date"
+                    value={formDataFim}
+                    onChange={(e) => setFormDataFim(e.target.value)}
+                  />
+                </div>
+              </div>
+              
+              <div className="grid gap-2">
+                <Label>Recorrência</Label>
+                <Select value={formRecorrencia} onValueChange={setFormRecorrencia}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="manual">Manual</SelectItem>
+                    <SelectItem value="diaria">Diária</SelectItem>
+                    <SelectItem value="semanal">Semanal</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {formRecorrencia !== "manual" && (
+                <div className="grid gap-2">
+                  <Label>Horários de Execução</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {horariosDisponiveis.map((h) => (
+                      <Badge
+                        key={h}
+                        variant={formHorarios.includes(h) ? "default" : "outline"}
+                        className="cursor-pointer"
+                        onClick={() => toggleHorario(h)}
+                      >
+                        {h}
+                      </Badge>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Clique para selecionar múltiplos horários
+                  </p>
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => {
+                setEditOpen(false);
+                setEditingConsulta(null);
+                resetForm();
+              }}>
+                Cancelar
+              </Button>
+              <Button onClick={handleSaveEdit} disabled={!formTribunal || !formTipo || !formTermo}>
+                Salvar Alterações
               </Button>
             </DialogFooter>
           </DialogContent>
