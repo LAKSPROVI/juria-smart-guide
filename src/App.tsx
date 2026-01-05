@@ -15,6 +15,7 @@ import Registros from "./pages/Registros";
 import Lixeira from "./pages/Lixeira";
 import Arquivo from "./pages/Arquivo";
 import Usuarios from "./pages/Usuarios";
+import MonitorProcessamento from "./pages/MonitorProcessamento";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -39,6 +40,7 @@ const App = () => (
           <Route path="/lixeira" element={<ProtectedRoute><Lixeira /></ProtectedRoute>} />
           <Route path="/arquivo" element={<ProtectedRoute><Arquivo /></ProtectedRoute>} />
           <Route path="/usuarios" element={<ProtectedRoute><Usuarios /></ProtectedRoute>} />
+          <Route path="/monitor" element={<ProtectedRoute><MonitorProcessamento /></ProtectedRoute>} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
