@@ -131,6 +131,10 @@ export function UploadDocumentos({ onUploadComplete }: UploadDocumentosProps) {
     try {
       updateFileStatus(id, { status: "uploading", progress: 10 });
 
+      // Obter user_id para organizar no storage
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Usuário não autenticado");
+
       // Criar registro do documento (inclui user_id via helper)
       const documento = await createDocumento({
         nome: file.name,
@@ -142,9 +146,40 @@ export function UploadDocumentos({ onUploadComplete }: UploadDocumentosProps) {
         embedding_processado: false,
       });
 
-      updateFileStatus(id, { progress: 30 });
+      updateFileStatus(id, { progress: 20 });
 
       let texto = "";
+      let urlArquivo: string | null = null;
+
+      // Upload do arquivo para o Storage (organizado por user_id/documento_id)
+      const storagePath = `${user.id}/${documento.id}/${file.name}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from("documentos")
+        .upload(storagePath, file, {
+          cacheControl: "3600",
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.error("Erro no upload para storage:", uploadError);
+        throw new Error(`Erro ao enviar arquivo: ${uploadError.message}`);
+      }
+
+      updateFileStatus(id, { progress: 40 });
+
+      // Gerar URL assinada para acesso
+      const { data: signedUrlData } = await supabase.storage
+        .from("documentos")
+        .createSignedUrl(storagePath, 60 * 60 * 24 * 7); // 7 dias
+
+      urlArquivo = signedUrlData?.signedUrl || null;
+
+      // Atualizar documento com a URL
+      await supabase
+        .from("documentos")
+        .update({ url_arquivo: urlArquivo })
+        .eq("id", documento.id);
 
       if (file.type === "text/plain" || file.name.endsWith(".txt")) {
         // Arquivos de texto: extrair diretamente
@@ -154,26 +189,22 @@ export function UploadDocumentos({ onUploadComplete }: UploadDocumentosProps) {
       } else if (file.type === "application/pdf") {
         const metodo = fileMetodo || "pdf-parse";
 
-        updateFileStatus(id, { status: "extracting", progress: 40 });
+        updateFileStatus(id, { status: "extracting", progress: 50 });
 
         toast({
           title: `Extraindo texto (${metodo})`,
           description: `Processando ${file.name}...`,
         });
 
-        const arrayBuffer = await file.arrayBuffer();
-        const base64 = btoa(
-          new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
-        );
-
+        // Chamar edge function passando a URL do arquivo (não base64)
         const { data: extracaoResult, error: extracaoError } = await supabase.functions.invoke(
           "extrair-texto-pdf",
           {
             body: {
               documento_id: documento.id,
+              url_arquivo: urlArquivo,
               metodo,
               processar_rag: true,
-              pdf_base64: base64,
             },
           }
         );
@@ -221,7 +252,7 @@ export function UploadDocumentos({ onUploadComplete }: UploadDocumentosProps) {
 
       toast({
         title: "Upload concluído",
-        description: `${file.name} processado com sucesso.`,
+        description: `${file.name} enviado e processado com sucesso.`,
       });
     } catch (error) {
       console.error("Erro no upload:", error);
