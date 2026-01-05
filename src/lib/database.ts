@@ -220,15 +220,46 @@ export async function saveResultados(consultaId: string, resultados: unknown[]) 
     };
   });
 
+  // Filtrar duplicatas - verificar se já existe um resultado 100% idêntico em TODOS os campos
+  const registrosUnicos = [];
+  
+  for (const registro of registros) {
+    // Buscar se já existe registro idêntico no banco
+    const { data: existente } = await supabase
+      .from('resultados_consultas')
+      .select('id')
+      .eq('numero_processo', registro.numero_processo)
+      .eq('sigla_tribunal', registro.sigla_tribunal)
+      .eq('nome_orgao', registro.nome_orgao)
+      .eq('tipo_comunicacao', registro.tipo_comunicacao)
+      .eq('data_disponibilizacao', registro.data_disponibilizacao)
+      .eq('data_publicacao', registro.data_publicacao)
+      .eq('texto_mensagem', registro.texto_mensagem)
+      .limit(1);
+    
+    // Se não existe registro idêntico, adicionar à lista
+    if (!existente || existente.length === 0) {
+      registrosUnicos.push(registro);
+    }
+  }
+
+  // Se não há registros novos, retornar vazio
+  if (registrosUnicos.length === 0) {
+    console.log('Nenhum resultado novo encontrado - todos já existem no banco');
+    return [];
+  }
+
+  console.log(`Salvando ${registrosUnicos.length} de ${registros.length} resultados (${registros.length - registrosUnicos.length} duplicatas ignoradas)`);
+
   const { data, error } = await supabase
     .from('resultados_consultas')
-    .insert(registros)
+    .insert(registrosUnicos)
     .select();
   
   if (error) throw error;
   
   // Também salvar no RAG (documento_chunks) para consulta via chat
-  for (const registro of registros) {
+  for (const registro of registrosUnicos) {
     if (registro.texto_mensagem || registro.numero_processo) {
       await saveResultadoParaRAG(registro);
     }
