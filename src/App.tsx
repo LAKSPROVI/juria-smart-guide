@@ -10,6 +10,7 @@ import Cadernos from "./pages/Cadernos";
 import Chat from "./pages/Chat";
 import Documentos from "./pages/Documentos";
 import Configuracoes from "./pages/Configuracoes";
+import Registros from "./pages/Registros";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -28,6 +29,7 @@ const App = () => (
           <Route path="/chat" element={<Chat />} />
           <Route path="/documentos" element={<Documentos />} />
           <Route path="/configuracoes" element={<Configuracoes />} />
+          <Route path="/registros" element={<Registros />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

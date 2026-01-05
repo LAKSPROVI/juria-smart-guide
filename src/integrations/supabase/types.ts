@@ -92,6 +92,42 @@ export type Database = {
         }
         Relationships: []
       }
+      config_proxy: {
+        Row: {
+          ativo: boolean | null
+          created_at: string
+          id: string
+          nome: string
+          status_ultimo_teste: string | null
+          token: string | null
+          ultima_verificacao: string | null
+          updated_at: string
+          url_base: string | null
+        }
+        Insert: {
+          ativo?: boolean | null
+          created_at?: string
+          id?: string
+          nome?: string
+          status_ultimo_teste?: string | null
+          token?: string | null
+          ultima_verificacao?: string | null
+          updated_at?: string
+          url_base?: string | null
+        }
+        Update: {
+          ativo?: boolean | null
+          created_at?: string
+          id?: string
+          nome?: string
+          status_ultimo_teste?: string | null
+          token?: string | null
+          ultima_verificacao?: string | null
+          updated_at?: string
+          url_base?: string | null
+        }
+        Relationships: []
+      }
       consultas: {
         Row: {
           ativo: boolean | null
@@ -270,6 +306,53 @@ export type Database = {
           },
         ]
       }
+      execucoes_agendadas: {
+        Row: {
+          consulta_id: string | null
+          created_at: string
+          duracao_ms: number | null
+          erro_mensagem: string | null
+          horario_agendado: string
+          horario_executado: string | null
+          id: string
+          origem: string | null
+          resultados_encontrados: number | null
+          status: string | null
+        }
+        Insert: {
+          consulta_id?: string | null
+          created_at?: string
+          duracao_ms?: number | null
+          erro_mensagem?: string | null
+          horario_agendado: string
+          horario_executado?: string | null
+          id?: string
+          origem?: string | null
+          resultados_encontrados?: number | null
+          status?: string | null
+        }
+        Update: {
+          consulta_id?: string | null
+          created_at?: string
+          duracao_ms?: number | null
+          erro_mensagem?: string | null
+          horario_agendado?: string
+          horario_executado?: string | null
+          id?: string
+          origem?: string | null
+          resultados_encontrados?: number | null
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "execucoes_agendadas_consulta_id_fkey"
+            columns: ["consulta_id"]
+            isOneToOne: false
+            referencedRelation: "consultas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       mensagens: {
         Row: {
           content: string
@@ -360,6 +443,54 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      system_logs: {
+        Row: {
+          acao: string
+          created_at: string
+          detalhes: Json | null
+          duracao_ms: number | null
+          entidade_id: string | null
+          entidade_tipo: string | null
+          erro_mensagem: string | null
+          id: string
+          ip_origem: string | null
+          origem: string | null
+          status: string | null
+          tipo: string
+          user_agent: string | null
+        }
+        Insert: {
+          acao: string
+          created_at?: string
+          detalhes?: Json | null
+          duracao_ms?: number | null
+          entidade_id?: string | null
+          entidade_tipo?: string | null
+          erro_mensagem?: string | null
+          id?: string
+          ip_origem?: string | null
+          origem?: string | null
+          status?: string | null
+          tipo: string
+          user_agent?: string | null
+        }
+        Update: {
+          acao?: string
+          created_at?: string
+          detalhes?: Json | null
+          duracao_ms?: number | null
+          entidade_id?: string | null
+          entidade_tipo?: string | null
+          erro_mensagem?: string | null
+          id?: string
+          ip_origem?: string | null
+          origem?: string | null
+          status?: string | null
+          tipo?: string
+          user_agent?: string | null
+        }
+        Relationships: []
       }
     }
     Views: {
