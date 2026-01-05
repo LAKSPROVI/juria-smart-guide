@@ -159,6 +159,7 @@ export type Database = {
           uf_oab: string | null
           ultima_execucao: string | null
           updated_at: string
+          user_id: string | null
         }
         Insert: {
           arquivado?: boolean | null
@@ -178,6 +179,7 @@ export type Database = {
           uf_oab?: string | null
           ultima_execucao?: string | null
           updated_at?: string
+          user_id?: string | null
         }
         Update: {
           arquivado?: boolean | null
@@ -197,6 +199,7 @@ export type Database = {
           uf_oab?: string | null
           ultima_execucao?: string | null
           updated_at?: string
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -209,6 +212,7 @@ export type Database = {
           titulo: string
           ultima_mensagem: string | null
           updated_at: string
+          user_id: string | null
         }
         Insert: {
           arquivado?: boolean | null
@@ -218,6 +222,7 @@ export type Database = {
           titulo: string
           ultima_mensagem?: string | null
           updated_at?: string
+          user_id?: string | null
         }
         Update: {
           arquivado?: boolean | null
@@ -227,6 +232,7 @@ export type Database = {
           titulo?: string
           ultima_mensagem?: string | null
           updated_at?: string
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -321,6 +327,7 @@ export type Database = {
           tribunal: string | null
           updated_at: string
           url_arquivo: string | null
+          user_id: string | null
         }
         Insert: {
           arquivado?: boolean | null
@@ -340,6 +347,7 @@ export type Database = {
           tribunal?: string | null
           updated_at?: string
           url_arquivo?: string | null
+          user_id?: string | null
         }
         Update: {
           arquivado?: boolean | null
@@ -359,6 +367,7 @@ export type Database = {
           tribunal?: string | null
           updated_at?: string
           url_arquivo?: string | null
+          user_id?: string | null
         }
         Relationships: [
           {

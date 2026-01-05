@@ -19,6 +19,29 @@ interface EmbeddingBatchRequest {
   }>;
 }
 
+// Verificar autenticação do usuário
+async function verificarAutenticacao(req: Request): Promise<{ user: any; supabaseClient: any } | null> {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader) {
+    return null;
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+  
+  const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+    global: { headers: { Authorization: authHeader } }
+  });
+
+  const { data: { user }, error } = await supabaseClient.auth.getUser();
+  
+  if (error || !user) {
+    return null;
+  }
+
+  return { user, supabaseClient };
+}
+
 // Gerar embedding usando Lovable AI Gateway (Gemini)
 async function gerarEmbedding(texto: string, apiKey: string): Promise<number[]> {
   // Usar modelo de embedding do Gemini via gateway
@@ -51,14 +74,27 @@ serve(async (req) => {
   }
 
   try {
+    // Verificar autenticação
+    const auth = await verificarAutenticacao(req);
+    if (!auth) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Autenticação necessária' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { user, supabaseClient } = auth;
+    console.log(`Usuário autenticado: ${user.email}`);
+
     const apiKey = Deno.env.get('LOVABLE_API_KEY');
     if (!apiKey) {
       throw new Error('LOVABLE_API_KEY não configurada');
     }
 
+    // Usar service role para operações em chunks
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
     const contentType = req.headers.get('content-type') || '';
     const body = await req.json();
@@ -74,9 +110,9 @@ serve(async (req) => {
         try {
           const embedding = await gerarEmbedding(item.texto, apiKey);
           
-          // Se tem chunk_id, atualizar no banco
+          // Se tem chunk_id, atualizar no banco (usando service role)
           if (item.chunk_id) {
-            const { error } = await supabase
+            const { error } = await supabaseAdmin
               .from('documento_chunks')
               .update({ embedding: JSON.stringify(embedding) })
               .eq('id', item.chunk_id);
@@ -122,7 +158,7 @@ serve(async (req) => {
       // Verificar cache se solicitado
       if (cache) {
         const queryHash = texto.toLowerCase().trim();
-        const { data: cached } = await supabase
+        const { data: cached } = await supabaseAdmin
           .from('query_embeddings_cache')
           .select('embedding')
           .eq('query_hash', queryHash)
@@ -132,10 +168,10 @@ serve(async (req) => {
           console.log('Embedding encontrado no cache');
           
           // Atualizar contador de uso
-          await supabase
+          await supabaseAdmin
             .from('query_embeddings_cache')
             .update({ 
-              hit_count: supabase.rpc('increment_hit_count'),
+              hit_count: supabaseAdmin.rpc('increment_hit_count'),
               last_used_at: new Date().toISOString()
             })
             .eq('query_hash', queryHash);
@@ -154,9 +190,9 @@ serve(async (req) => {
       // Gerar novo embedding
       const embedding = await gerarEmbedding(texto, apiKey);
 
-      // Salvar no chunk se fornecido
+      // Salvar no chunk se fornecido (usando service role)
       if (chunk_id) {
-        const { error } = await supabase
+        const { error } = await supabaseAdmin
           .from('documento_chunks')
           .update({ embedding: JSON.stringify(embedding) })
           .eq('id', chunk_id);
@@ -168,7 +204,7 @@ serve(async (req) => {
 
       // Salvar no cache se solicitado
       if (cache) {
-        await supabase
+        await supabaseAdmin
           .from('query_embeddings_cache')
           .upsert({
             query_text: texto.substring(0, 1000),
