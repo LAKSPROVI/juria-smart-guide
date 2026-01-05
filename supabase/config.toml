@@ -11,3 +11,9 @@ verify_jwt = false
 
 [functions.baixar-caderno]
 verify_jwt = false
+
+[functions.gerar-embedding]
+verify_jwt = false
+
+[functions.processar-documento-rag]
+verify_jwt = false
