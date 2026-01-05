@@ -146,7 +146,7 @@ export default function Consultas() {
         siglaTribunal: consulta.tribunal,
         dataInicial: consulta.data_inicial,
         dataFinal: consulta.data_final,
-      });
+      }, consulta.id);
 
       console.log("Resposta da API:", response);
 

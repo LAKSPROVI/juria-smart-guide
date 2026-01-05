@@ -9,6 +9,7 @@ import {
   Scale,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -20,6 +21,7 @@ const navigation = [
   { name: "Cadernos DJE", href: "/cadernos", icon: FileText },
   { name: "Chat IA", href: "/chat", icon: MessageSquare },
   { name: "Documentos", href: "/documentos", icon: FolderOpen },
+  { name: "Registros", href: "/registros", icon: ClipboardList },
   { name: "Configurações", href: "/configuracoes", icon: Settings },
 ];
 

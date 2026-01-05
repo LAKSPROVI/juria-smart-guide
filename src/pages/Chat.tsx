@@ -32,6 +32,7 @@ import {
   Conversa,
   Mensagem 
 } from "@/lib/database";
+import { registrarLog } from "@/lib/logging";
 
 interface ChatMessage {
   id: string;
@@ -139,6 +140,8 @@ export default function Chat() {
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
 
+    const inicio = Date.now();
+
     // Se não há conversa selecionada, criar uma nova
     let currentConversaId = conversaAtual;
     if (!currentConversaId) {
@@ -148,6 +151,14 @@ export default function Chat() {
         setConversas(prev => [conversa, ...prev]);
         currentConversaId = conversa.id;
         setConversaAtual(conversa.id);
+        
+        await registrarLog({
+          tipo: 'chat',
+          acao: 'criar',
+          entidade_tipo: 'conversa',
+          entidade_id: conversa.id,
+          detalhes: { titulo },
+        });
       } catch (error) {
         toast({
           title: "Erro ao criar conversa",
@@ -200,11 +211,35 @@ export default function Chat() {
       // Salvar resposta no banco
       await addMensagem(currentConversaId, "assistant", assistantContent);
       
+      // Registrar log de interação
+      await registrarLog({
+        tipo: 'chat',
+        acao: 'enviar',
+        entidade_tipo: 'conversa',
+        entidade_id: currentConversaId,
+        detalhes: { 
+          pergunta_length: input.length, 
+          resposta_length: assistantContent.length,
+        },
+        duracao_ms: Date.now() - inicio,
+      });
+      
       // Atualizar lista de conversas
       await loadConversas();
 
     } catch (error) {
       console.error("Erro ao enviar mensagem:", error);
+      
+      await registrarLog({
+        tipo: 'chat',
+        acao: 'erro',
+        entidade_tipo: 'conversa',
+        entidade_id: currentConversaId,
+        status: 'erro',
+        erro_mensagem: error instanceof Error ? error.message : String(error),
+        duracao_ms: Date.now() - inicio,
+      });
+      
       toast({
         title: "Erro ao enviar mensagem",
         description: error instanceof Error ? error.message : "Erro desconhecido",
