@@ -40,25 +40,40 @@ serve(async (req) => {
       method: 'GET',
       headers: {
         'Accept': 'application/json, text/html, */*',
-        'User-Agent': 'Mozilla/5.0 (compatible; CadernoBot/1.0)',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
       },
     });
     
+    console.log("Response status:", response.status);
+    
     if (!response.ok) {
-      if (response.status === 404) {
-        return new Response(
-          JSON.stringify({ 
-            success: false, 
-            error: "Caderno não disponível para esta data" 
-          }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+      // Mensagens de erro mais informativas
+      let errorMessage = `Erro na API: HTTP ${response.status}`;
+      let suggestion = "";
+      
+      if (response.status === 403) {
+        errorMessage = "Acesso bloqueado pela API do PJe (HTTP 403)";
+        suggestion = "A API ComunicaAPI bloqueia requisições de servidores fora do Brasil. Configure um proxy brasileiro nas Configurações para contornar essa restrição.";
+      } else if (response.status === 404) {
+        errorMessage = "Caderno não encontrado (HTTP 404)";
+        suggestion = "Verifique se a data é um dia útil (não fim de semana ou feriado) e se o tribunal está correto.";
+      } else if (response.status === 400) {
+        errorMessage = "Requisição inválida (HTTP 400)";
+        suggestion = "A data pode ser um fim de semana/feriado ou o formato do tribunal pode estar incorreto.";
+      } else if (response.status === 500 || response.status === 502 || response.status === 503) {
+        errorMessage = `Servidor do PJe indisponível (HTTP ${response.status})`;
+        suggestion = "Tente novamente em alguns minutos.";
       }
+      
+      console.log("Erro:", errorMessage, suggestion);
       
       return new Response(
         JSON.stringify({ 
           success: false, 
-          error: `Erro na API: HTTP ${response.status}` 
+          error: errorMessage,
+          suggestion,
+          httpStatus: response.status
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -110,7 +125,8 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: false, 
-        error: errorMessage 
+        error: errorMessage,
+        suggestion: "Verifique sua conexão ou tente novamente mais tarde."
       }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
