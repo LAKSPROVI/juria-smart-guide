@@ -1,0 +1,25 @@
+# Nixpacks configuration for Railway deployment
+# This forces Railway to use NPM instead of Bun
+
+[phases.setup]
+nixPkgs = ["nodejs_18"]
+
+[phases.install]
+# Use npm ci for deterministic installs
+cmds = ["npm ci"]
+
+[phases.build]
+# Build with Vite
+cmds = ["npm run build"]
+
+[phases.start]
+# Serve the built application
+cmd = "npx serve dist -s -l tcp://0.0.0.0:$PORT"
+
+# Health check configuration
+[start]
+cmd = "npx serve dist -s -l tcp://0.0.0.0:$PORT"
+
+# Environment variables for build time
+[env]
+NODE_ENV = "production"
