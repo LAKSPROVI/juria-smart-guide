@@ -42,6 +42,7 @@ export interface ConsultaResponse {
 // Cache de resultados em memória (session)
 const resultadosCache = new Map<string, { data: IntimacaoResult[]; timestamp: number }>();
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutos
+const REQUEST_TIMEOUT_MS = 12000;
 
 function getCacheKey(params: ConsultaParams): string {
   return JSON.stringify({
@@ -54,39 +55,15 @@ function getCacheKey(params: ConsultaParams): string {
   });
 }
 
-// Busca configuração do proxy
-async function getProxyConfig() {
-  const { data } = await supabase
-    .from('config_proxy')
-    .select('*')
-    .eq('nome', 'proxy_brasil')
-    .single();
-  return data;
-}
+async function fetchWithTimeout(url: string, init?: RequestInit, timeout = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new DOMException("Timeout", "AbortError")), timeout);
 
-// Consulta via proxy no Brasil
-async function consultarViaProxy(params: ConsultaParams): Promise<ConsultaResponse> {
-  const config = await getProxyConfig();
-  
-  if (!config?.url_base || !config.ativo) {
-    throw new Error("Proxy não configurado");
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
   }
-
-  const response = await fetch(`${config.url_base}/consulta`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.token || ''}`,
-    },
-    body: JSON.stringify(params),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Erro do proxy: ${response.status}`);
-  }
-
-  const data = await response.json();
-  return { ...data, via: 'proxy' };
 }
 
 // Chamada DIRETA do navegador para a API do PJe (evita bloqueio geográfico do servidor)
@@ -123,7 +100,7 @@ async function consultarAPIDirecta(params: ConsultaParams): Promise<IntimacaoRes
   const fullUrl = `${baseUrl}?${urlParams.toString()}`;
   console.log("Consultando ComunicaAPI diretamente do navegador:", fullUrl);
 
-  const response = await fetch(fullUrl, {
+  const response = await fetchWithTimeout(fullUrl, {
     method: "GET",
     headers: {
       "Accept": "application/json",
@@ -156,7 +133,7 @@ async function consultarAPIDirecta(params: ConsultaParams): Promise<IntimacaoRes
   return [];
 }
 
-// Fallback para edge function (caso a chamada direta falhe por CORS)
+// Consulta via edge function (mantém segredos no backend)
 async function consultarViaEdgeFunction(params: ConsultaParams): Promise<ConsultaResponse> {
   const { data, error } = await supabase.functions.invoke('consulta-intimacoes', {
     body: params,
@@ -252,42 +229,39 @@ export async function consultarIntimacoes(params: ConsultaParams, consultaId?: s
     }
   }
 
-  // 3. Tentar via proxy se configurado
+  // 3. Tentar via edge function primeiro (seguro e com segredos no backend)
   try {
-    const proxyConfig = await getProxyConfig();
-    if (proxyConfig?.ativo && proxyConfig?.url_base) {
-      console.log("Tentando via proxy...");
-      const response = await consultarViaProxy(params);
-      
-      if (response.success && response.data.length > 0) {
-        resultadosCache.set(cacheKey, { data: response.data, timestamp: Date.now() });
-      }
-      
-      await registrarLog({
-        tipo: 'consulta',
-        acao: 'executar',
-        entidade_tipo: 'consulta',
-        entidade_id: consultaId,
-        detalhes: { params, resultados: response.total, via: 'proxy' },
-        status: response.success ? 'sucesso' : 'erro',
-        erro_mensagem: response.error,
-        duracao_ms: Date.now() - inicio,
-      });
-      
+    const response = await consultarViaEdgeFunction(params);
+
+    if (response.success && response.data.length > 0) {
+      resultadosCache.set(cacheKey, { data: response.data, timestamp: Date.now() });
+    }
+
+    await registrarLog({
+      tipo: 'consulta',
+      acao: 'executar',
+      entidade_tipo: 'consulta',
+      entidade_id: consultaId,
+      detalhes: { params, resultados: response.total, via: 'edge_function' },
+      status: response.success ? 'sucesso' : 'erro',
+      erro_mensagem: response.error,
+      duracao_ms: Date.now() - inicio,
+    });
+
+    if (response.success) {
       return response;
     }
-  } catch (proxyError) {
-    console.log("Proxy não disponível, tentando alternativas...", proxyError);
+  } catch (edgeError) {
+    console.log("Edge function indisponível, tentando chamada direta...", edgeError);
   }
 
-  // 4. Tentar chamada direta do navegador (evita bloqueio geográfico)
+  // 4. Fallback: chamada direta do navegador (pode falhar por CORS ou geolocalização)
   try {
     console.log("Tentando chamada direta do navegador...");
     const resultados = await consultarAPIDirecta(params);
-    
-    // Salvar no cache em memória
+
     resultadosCache.set(cacheKey, { data: resultados, timestamp: Date.now() });
-    
+
     await registrarLog({
       tipo: 'consulta',
       acao: 'executar',
@@ -297,7 +271,7 @@ export async function consultarIntimacoes(params: ConsultaParams, consultaId?: s
       status: 'sucesso',
       duracao_ms: Date.now() - inicio,
     });
-    
+
     return {
       success: true,
       data: resultados,
@@ -307,43 +281,18 @@ export async function consultarIntimacoes(params: ConsultaParams, consultaId?: s
       via: 'navegador_direto',
     };
   } catch (directError) {
-    console.log("Chamada direta falhou (possivelmente CORS), tentando via edge function...", directError);
-    
-    // 5. Fallback para edge function
-    try {
-      const response = await consultarViaEdgeFunction(params);
-      
-      if (response.success && response.data.length > 0) {
-        resultadosCache.set(cacheKey, { data: response.data, timestamp: Date.now() });
-      }
-      
-      await registrarLog({
-        tipo: 'consulta',
-        acao: 'executar',
-        entidade_tipo: 'consulta',
-        entidade_id: consultaId,
-        detalhes: { params, resultados: response.total, via: 'edge_function' },
-        status: response.success ? 'sucesso' : 'erro',
-        erro_mensagem: response.error,
-        duracao_ms: Date.now() - inicio,
-      });
-      
-      return response;
-    } catch (edgeError) {
-      await registrarLog({
-        tipo: 'consulta',
-        acao: 'executar',
-        entidade_tipo: 'consulta',
-        entidade_id: consultaId,
-        detalhes: { params },
-        status: 'erro',
-        erro_mensagem: edgeError instanceof Error ? edgeError.message : String(edgeError),
-        duracao_ms: Date.now() - inicio,
-      });
-      
-      console.error("Erro na edge function:", edgeError);
-      throw edgeError;
-    }
+    await registrarLog({
+      tipo: 'consulta',
+      acao: 'executar',
+      entidade_tipo: 'consulta',
+      entidade_id: consultaId,
+      detalhes: { params },
+      status: 'erro',
+      erro_mensagem: directError instanceof Error ? directError.message : String(directError),
+      duracao_ms: Date.now() - inicio,
+    });
+
+    throw directError;
   }
 }
 
@@ -356,33 +305,32 @@ export async function forcarAtualizacaoConsulta(params: ConsultaParams, consulta
   const cacheKey = getCacheKey(params);
   resultadosCache.delete(cacheKey);
   
-  // 1. Tentar via proxy se configurado
+  // 1. Tentar via edge function (evita exposição de segredos e ignora cache)
   try {
-    const proxyConfig = await getProxyConfig();
-    if (proxyConfig?.ativo && proxyConfig?.url_base) {
-      const response = await consultarViaProxy(params);
-      if (response.success && response.data.length > 0) {
-        resultadosCache.set(cacheKey, { data: response.data, timestamp: Date.now() });
-      }
-      
-      await registrarLog({
-        tipo: 'consulta',
-        acao: 'executar',
-        entidade_tipo: 'consulta',
-        entidade_id: consultaId,
-        detalhes: { params, resultados: response.total, via: 'proxy', forcado: true },
-        status: response.success ? 'sucesso' : 'erro',
-        erro_mensagem: response.error,
-        duracao_ms: Date.now() - inicio,
-      });
-      
+    const response = await consultarViaEdgeFunction(params);
+    if (response.success && response.data.length > 0) {
+      resultadosCache.set(cacheKey, { data: response.data, timestamp: Date.now() });
+    }
+
+    await registrarLog({
+      tipo: 'consulta',
+      acao: 'executar',
+      entidade_tipo: 'consulta',
+      entidade_id: consultaId,
+      detalhes: { params, resultados: response.total, via: 'edge_function', forcado: true },
+      status: response.success ? 'sucesso' : 'erro',
+      erro_mensagem: response.error,
+      duracao_ms: Date.now() - inicio,
+    });
+
+    if (response.success) {
       return response;
     }
-  } catch (proxyError) {
-    console.log("Proxy não disponível...", proxyError);
+  } catch (edgeError) {
+    console.log("Edge function indisponível (forçar atualização)", edgeError);
   }
   
-  // 2. Tentar chamada direta
+  // 2. Fallback: chamada direta
   try {
     const resultados = await consultarAPIDirecta(params);
     resultadosCache.set(cacheKey, { data: resultados, timestamp: Date.now() });
@@ -405,30 +353,18 @@ export async function forcarAtualizacaoConsulta(params: ConsultaParams, consulta
       fromCache: false,
       via: 'navegador_direto',
     };
-  } catch (error) {
-    // 3. Fallback para edge function
-    const response = await consultarViaEdgeFunction(params);
-    if (response.success && response.data.length > 0) {
-      resultadosCache.set(cacheKey, { data: response.data, timestamp: Date.now() });
-    }
-    
+  } catch (directError) {
     await registrarLog({
       tipo: 'consulta',
       acao: 'executar',
       entidade_tipo: 'consulta',
       entidade_id: consultaId,
-      detalhes: { params, resultados: response.total, via: 'edge_function', forcado: true },
-      status: response.success ? 'sucesso' : 'erro',
-      erro_mensagem: response.error,
+      detalhes: { params },
+      status: 'erro',
+      erro_mensagem: directError instanceof Error ? directError.message : String(directError),
       duracao_ms: Date.now() - inicio,
     });
-    
-    return response;
-  }
-}
 
-// Limpar todo o cache
-export function limparCache(): void {
-  resultadosCache.clear();
-  console.log("Cache de resultados limpo");
+    throw directError;
+  }
 }

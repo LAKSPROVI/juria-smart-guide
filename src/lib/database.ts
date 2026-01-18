@@ -225,26 +225,50 @@ export async function saveResultados(consultaId: string, resultados: unknown[]) 
     };
   });
 
-  // Filtrar duplicatas - verificar se já existe um resultado 100% idêntico em TODOS os campos
-  const registrosUnicos = [];
-  
-  for (const registro of registros) {
-    const { data: existente } = await supabase
+  const buildKey = (registro: typeof registros[number]) => [
+    registro.numero_processo || "",
+    registro.sigla_tribunal || "",
+    registro.nome_orgao || "",
+    registro.tipo_comunicacao || "",
+    registro.data_disponibilizacao || "",
+    registro.data_publicacao || "",
+    registro.texto_mensagem || "",
+  ].join("|");
+
+  // Dedup em memória primeiro
+  const incomingUnique = new Set<string>();
+  const registrosNormalizados = registros.filter((r) => {
+    const key = buildKey(r);
+    if (incomingUnique.has(key)) return false;
+    incomingUnique.add(key);
+    return true;
+  });
+
+  // Buscar possíveis existentes em lote
+  const numerosProcesso = Array.from(new Set(registrosNormalizados.map(r => r.numero_processo).filter(Boolean)));
+  const siglasTribunal = Array.from(new Set(registrosNormalizados.map(r => r.sigla_tribunal).filter(Boolean)));
+
+  let existentesKeys = new Set<string>();
+
+  if (numerosProcesso.length > 0 || siglasTribunal.length > 0) {
+    let query = supabase
       .from('resultados_consultas')
-      .select('id')
-      .eq('numero_processo', registro.numero_processo)
-      .eq('sigla_tribunal', registro.sigla_tribunal)
-      .eq('nome_orgao', registro.nome_orgao)
-      .eq('tipo_comunicacao', registro.tipo_comunicacao)
-      .eq('data_disponibilizacao', registro.data_disponibilizacao)
-      .eq('data_publicacao', registro.data_publicacao)
-      .eq('texto_mensagem', registro.texto_mensagem)
-      .limit(1);
-    
-    if (!existente || existente.length === 0) {
-      registrosUnicos.push(registro);
+      .select('numero_processo, sigla_tribunal, nome_orgao, tipo_comunicacao, data_disponibilizacao, data_publicacao, texto_mensagem');
+
+    if (numerosProcesso.length > 0) {
+      query = query.in('numero_processo', numerosProcesso as string[]);
+    }
+    if (siglasTribunal.length > 0) {
+      query = query.in('sigla_tribunal', siglasTribunal as string[]);
+    }
+
+    const { data: existentes } = await query;
+    if (existentes) {
+      existentesKeys = new Set(existentes.map(buildKey));
     }
   }
+
+  const registrosUnicos = registrosNormalizados.filter((registro) => !existentesKeys.has(buildKey(registro)));
 
   if (registrosUnicos.length === 0) {
     console.log('Nenhum resultado novo encontrado - todos já existem no banco');

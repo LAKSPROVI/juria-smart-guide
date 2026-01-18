@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { checkAuthorizationEmail } from "@/lib/auth";
 import { User, Session } from "@supabase/supabase-js";
 import { Loader2 } from "lucide-react";
 
@@ -20,11 +21,8 @@ const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
         setSession(session);
         setUser(session?.user ?? null);
         
-        if (session?.user) {
-          // Verificar autorização de forma assíncrona
-          setTimeout(() => {
-            checkAuthorization(session.user.email?.toLowerCase() || '');
-          }, 0);
+        if (session?.user?.email) {
+          checkAuthorization(session.user.email);
         } else {
           setIsAuthorized(false);
           setLoading(false);
@@ -36,8 +34,8 @@ const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
       setSession(session);
       setUser(session?.user ?? null);
       
-      if (session?.user) {
-        checkAuthorization(session.user.email?.toLowerCase() || '');
+      if (session?.user?.email) {
+        checkAuthorization(session.user.email);
       } else {
         setLoading(false);
       }
@@ -47,26 +45,8 @@ const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   }, []);
 
   const checkAuthorization = async (email: string) => {
-    // Admin master sempre autorizado
-    if (email === 'navegacaonouniverso@gmail.com') {
-      setIsAuthorized(true);
-      setLoading(false);
-      return;
-    }
-
-    // Verificar se está na lista de autorizados
-    const { data, error } = await supabase
-      .from('usuarios_autorizados')
-      .select('autorizado')
-      .eq('email', email)
-      .single();
-    
-    if (error || !data || !data.autorizado) {
-      setIsAuthorized(false);
-    } else {
-      setIsAuthorized(true);
-    }
-    
+    const { authorized } = await checkAuthorizationEmail(email);
+    setIsAuthorized(authorized);
     setLoading(false);
   };
 

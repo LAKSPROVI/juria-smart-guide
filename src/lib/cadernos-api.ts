@@ -19,6 +19,19 @@ export interface CadernoDownloadResult {
   totalPublicacoes?: number;
 }
 
+const REQUEST_TIMEOUT_MS = 12000;
+
+const fetchWithTimeout = async (url: string, init?: RequestInit, timeout = REQUEST_TIMEOUT_MS) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new DOMException("Timeout", "AbortError")), timeout);
+
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 // Buscar caderno da API ComunicaAPI
 export async function baixarCadernoDJE(params: CadernoDownloadParams): Promise<CadernoDownloadResult> {
   const inicio = Date.now();
@@ -110,50 +123,10 @@ export async function baixarCadernoDJE(params: CadernoDownloadParams): Promise<C
       };
     };
 
-    // MÉTODO 1: Tentar via navegador direto (funciona se usuário tem proxy Brasil)
-    console.log("=== MÉTODO 1: Tentando via navegador direto ===");
-    console.log("URL:", url);
+    // MÉTODO 1: Edge Function primeiro (seguro e sem trafegar tokens no cliente)
+    console.log("=== MÉTODO 1: Tentando via Edge Function ===");
 
-    let browserError: string | null = null;
-
-    try {
-      const response = await fetch(url, {
-        method: "GET",
-        headers: {
-          Accept: "application/json, text/html, */*",
-          "Cache-Control": "no-cache",
-        },
-      });
-
-      console.log("Navegador - Status:", response.status);
-
-      if (response.ok) {
-        console.log("✅ Sucesso via navegador direto!");
-        return await processarResposta(response, "navegador");
-      }
-
-      if (response.status === 404) {
-        await supabase
-          .from("cadernos")
-          .update({ status: "erro", erro_mensagem: "Caderno não disponível para esta data" })
-          .eq("id", caderno.id);
-
-        return {
-          success: false,
-          cadernoId: caderno.id,
-          error: "Caderno não disponível para esta data (404). Verifique se é um dia útil.",
-        };
-      }
-
-      browserError = `HTTP ${response.status}`;
-      console.log("❌ Navegador falhou:", browserError);
-    } catch (fetchError) {
-      browserError = fetchError instanceof Error ? fetchError.message : "Erro de conexão";
-      console.log("❌ Navegador falhou (CORS/conexão):", browserError);
-    }
-
-    // MÉTODO 2: Tentar via Edge Function (funciona se servidor não está bloqueado)
-    console.log("=== MÉTODO 2: Tentando via Edge Function ===");
+    let edgeErrorMsg: string | null = null;
 
     try {
       const { data: edgeResult, error: edgeError } = await supabase.functions.invoke("baixar-caderno", {
@@ -205,45 +178,70 @@ export async function baixarCadernoDJE(params: CadernoDownloadParams): Promise<C
         };
       }
 
-      // Ambos métodos falharam
-      const edgeErrorMsg = edgeError?.message || edgeResult?.error || "Erro na Edge Function";
-      const suggestion = edgeResult?.suggestion || "";
-
+      edgeErrorMsg = edgeError?.message || edgeResult?.error || "Erro na Edge Function";
       console.log("❌ Edge Function falhou:", edgeErrorMsg);
+    } catch (edgeFuncError) {
+      edgeErrorMsg = edgeFuncError instanceof Error ? edgeFuncError.message : "Erro desconhecido";
+      console.log("❌ Edge Function falhou (exceção):", edgeErrorMsg);
+    }
+
+    // MÉTODO 2: Fallback via navegador direto com timeout (pode falhar por CORS)
+    console.log("=== MÉTODO 2: Tentando via navegador direto ===");
+    console.log("URL:", url);
+
+    try {
+      const response = await fetchWithTimeout(url, {
+        method: "GET",
+        headers: {
+          Accept: "application/json, text/html, */*",
+          "Cache-Control": "no-cache",
+        },
+      });
+
+      console.log("Navegador - Status:", response.status);
+
+      if (response.ok) {
+        console.log("✅ Sucesso via navegador direto!");
+        return await processarResposta(response, "navegador");
+      }
+
+      if (response.status === 404) {
+        await supabase
+          .from("cadernos")
+          .update({ status: "erro", erro_mensagem: "Caderno não disponível para esta data" })
+          .eq("id", caderno.id);
+
+        return {
+          success: false,
+          cadernoId: caderno.id,
+          error: "Caderno não disponível para esta data (404). Verifique se é um dia útil.",
+        };
+      }
+
+      const browserError = `HTTP ${response.status}`;
+      console.log("❌ Navegador falhou:", browserError);
 
       await supabase
         .from("cadernos")
         .update({ status: "erro", erro_mensagem: `Navegador: ${browserError} | Servidor: ${edgeErrorMsg}` })
         .eq("id", caderno.id);
 
-      await registrarLog({
-        tipo: "caderno",
-        acao: "download",
-        entidade_tipo: "caderno",
-        entidade_id: caderno.id,
-        detalhes: { tribunal: params.tribunal, data: params.data, tipo: params.tipo, browserError, edgeError: edgeErrorMsg },
-        status: "erro",
-        erro_mensagem: `Ambos métodos falharam`,
-        duracao_ms: Date.now() - inicio,
-      });
-
       return {
         success: false,
         cadernoId: caderno.id,
-        error: suggestion ? `${edgeErrorMsg}. ${suggestion}` : `Navegador: ${browserError} | Servidor: ${edgeErrorMsg}`,
+        error: edgeErrorMsg ? `Servidor: ${edgeErrorMsg}` : browserError,
       };
-    } catch (edgeFuncError) {
-      const errorMsg = edgeFuncError instanceof Error ? edgeFuncError.message : "Erro desconhecido";
-
+    } catch (browserError) {
+      const browserMsg = browserError instanceof Error ? browserError.message : "Erro de conexão";
       await supabase
         .from("cadernos")
-        .update({ status: "erro", erro_mensagem: `Navegador: ${browserError} | Servidor: ${errorMsg}` })
+        .update({ status: "erro", erro_mensagem: `Navegador: ${browserMsg} | Servidor: ${edgeErrorMsg}` })
         .eq("id", caderno.id);
 
       return {
         success: false,
         cadernoId: caderno.id,
-        error: `Navegador: ${browserError} | Servidor: ${errorMsg}`,
+        error: edgeErrorMsg ? `Servidor: ${edgeErrorMsg}` : browserMsg,
       };
     }
   } catch (error) {

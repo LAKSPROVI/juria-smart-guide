@@ -46,7 +46,6 @@ import {
 export default function Configuracoes() {
   const { toast } = useToast();
   const [proxyUrl, setProxyUrl] = useState("");
-  const [proxyToken, setProxyToken] = useState("");
   const [proxyAtivo, setProxyAtivo] = useState(false);
   const [proxyStatus, setProxyStatus] = useState<string | null>(null);
   const [loadingProxy, setLoadingProxy] = useState(true);
@@ -62,7 +61,6 @@ export default function Configuracoes() {
       const config = await getConfigProxy();
       if (config) {
         setProxyUrl(config.url_base || "");
-        setProxyToken(config.token || "");
         setProxyAtivo(config.ativo);
         setProxyStatus(config.status_ultimo_teste);
       }
@@ -77,7 +75,6 @@ export default function Configuracoes() {
     try {
       const success = await updateConfigProxy({
         url_base: proxyUrl || null,
-        token: proxyToken || null,
         ativo: proxyAtivo,
       });
 
@@ -189,14 +186,11 @@ export default function Configuracoes() {
                       </p>
                     </div>
 
-                    <div className="space-y-2">
-                      <Label>Token de Autenticação</Label>
-                      <Input
-                        type="password"
-                        placeholder="Token secreto para autenticar requisições"
-                        value={proxyToken}
-                        onChange={(e) => setProxyToken(e.target.value)}
-                      />
+                    <div className="space-y-2 rounded-lg bg-amber-50 dark:bg-amber-950/20 p-3 border border-amber-200 dark:border-amber-800">
+                      <p className="text-xs text-amber-800 dark:text-amber-200 flex items-start gap-2">
+                        <span className="text-lg mt-0.5">ℹ️</span>
+                        <span><strong>Token protegido.</strong> O token é armazenado com segurança no servidor. Configure-o apenas na primeira vez, via instruções.</span>
+                      </p>
                     </div>
 
                     <div className="flex items-center gap-2">

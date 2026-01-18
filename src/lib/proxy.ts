@@ -5,101 +5,87 @@ export interface ConfigProxy {
   id: string;
   nome: string;
   url_base: string | null;
-  token: string | null;
   ativo: boolean;
   ultima_verificacao: string | null;
   status_ultimo_teste: string | null;
 }
 
 /**
- * Busca a configuração do proxy
+ * Busca a configuração do proxy via edge function (seguro, sem expor token)
  */
 export async function getConfigProxy(): Promise<ConfigProxy | null> {
-  const { data, error } = await supabase
-    .from('config_proxy')
-    .select('*')
-    .eq('nome', 'proxy_brasil')
-    .single();
+  try {
+    const { data, error } = await supabase.functions.invoke("gerenciar-proxy", {
+      body: { action: "get" },
+    });
 
-  if (error) {
-    console.error("Erro ao buscar config proxy:", error);
+    if (error) {
+      console.error("Erro ao buscar config proxy:", error);
+      return null;
+    }
+
+    return data as ConfigProxy;
+  } catch (err) {
+    console.error("Erro ao chamar edge function gerenciar-proxy:", err);
     return null;
   }
-
-  return data as ConfigProxy;
 }
 
 /**
- * Atualiza a configuração do proxy
+ * Atualiza a configuração do proxy via edge function (apenas URL e status)
  */
 export async function updateConfigProxy(updates: Partial<ConfigProxy>): Promise<boolean> {
-  const { error } = await supabase
-    .from('config_proxy')
-    .update({
-      ...updates,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('nome', 'proxy_brasil');
-
-  if (error) {
-    console.error("Erro ao atualizar config proxy:", error);
-    return false;
-  }
-
-  await registrarLog({
-    tipo: 'admin',
-    acao: 'editar',
-    entidade_tipo: 'config_proxy',
-    detalhes: { campos_atualizados: Object.keys(updates) },
-  });
-
-  return true;
-}
-
-/**
- * Testa a conexão com o proxy
- */
-export async function testarProxy(): Promise<{ sucesso: boolean; mensagem: string }> {
-  const config = await getConfigProxy();
-
-  if (!config?.url_base) {
-    return { sucesso: false, mensagem: "URL do proxy não configurada" };
-  }
-
   try {
-    const response = await fetch(`${config.url_base}/health`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${config.token || ''}`,
+    const { error } = await supabase.functions.invoke("gerenciar-proxy", {
+      body: {
+        action: "update",
+        updates: {
+          url_base: updates.url_base || null,
+          ativo: updates.ativo !== undefined ? updates.ativo : false,
+        },
       },
     });
 
-    const sucesso = response.ok;
-    
-    await supabase
-      .from('config_proxy')
-      .update({
-        ultima_verificacao: new Date().toISOString(),
-        status_ultimo_teste: sucesso ? 'ok' : 'erro',
-      })
-      .eq('nome', 'proxy_brasil');
+    if (error) {
+      console.error("Erro ao atualizar config proxy:", error);
+      return false;
+    }
 
-    return {
-      sucesso,
-      mensagem: sucesso ? "Proxy funcionando corretamente" : `Erro: ${response.status}`,
-    };
-  } catch (error) {
-    await supabase
-      .from('config_proxy')
-      .update({
-        ultima_verificacao: new Date().toISOString(),
-        status_ultimo_teste: 'timeout',
-      })
-      .eq('nome', 'proxy_brasil');
+    await registrarLog({
+      tipo: "admin",
+      acao: "editar",
+      entidade_tipo: "config_proxy",
+      detalhes: { campos_atualizados: Object.keys(updates) },
+    });
 
+    return true;
+  } catch (err) {
+    console.error("Erro ao chamar edge function gerenciar-proxy:", err);
+    return false;
+  }
+}
+
+/**
+ * Testa a conexão com o proxy via edge function (token fica seguro no backend)
+ */
+export async function testarProxy(): Promise<{ sucesso: boolean; mensagem: string }> {
+  try {
+    const { data, error } = await supabase.functions.invoke("gerenciar-proxy", {
+      body: { action: "test" },
+    });
+
+    if (error) {
+      return {
+        sucesso: false,
+        mensagem: error.message || "Erro ao testar proxy",
+      };
+    }
+
+    return data as { sucesso: boolean; mensagem: string };
+  } catch (err) {
     return {
       sucesso: false,
-      mensagem: error instanceof Error ? error.message : "Erro de conexão",
+      mensagem: err instanceof Error ? err.message : "Erro de conexão",
     };
   }
 }

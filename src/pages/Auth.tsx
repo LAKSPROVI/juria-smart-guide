@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { checkAuthorizationEmail, registerAccessRequest } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
@@ -23,9 +24,9 @@ const Auth = () => {
           setUserEmail(email || null);
           
           // Verificar se é admin ou está autorizado
-          const isAuthorized = await checkAuthorization(email || '');
+          const { authorized } = await checkAuthorizationEmail(email || '');
           
-          if (isAuthorized) {
+          if (authorized) {
             navigate("/");
           } else {
             setPendingApproval(true);
@@ -43,9 +44,9 @@ const Auth = () => {
         const email = session.user.email?.toLowerCase();
         setUserEmail(email || null);
         
-        const isAuthorized = await checkAuthorization(email || '');
+        const { authorized } = await checkAuthorizationEmail(email || '');
         
-        if (isAuthorized) {
+        if (authorized) {
           navigate("/");
         } else {
           setPendingApproval(true);
@@ -57,41 +58,7 @@ const Auth = () => {
     return () => subscription.unsubscribe();
   }, [navigate]);
 
-  const checkAuthorization = async (email: string): Promise<boolean> => {
-    // Admin master sempre autorizado
-    if (email === 'navegacaonouniverso@gmail.com') {
-      return true;
-    }
-    
-    // Verificar se está na lista de autorizados
-    const { data, error } = await supabase
-      .from('usuarios_autorizados')
-      .select('autorizado')
-      .eq('email', email)
-      .single();
-    
-    if (error || !data) {
-      return false;
-    }
-    
-    return data.autorizado === true;
-  };
-
-  const registerAccessRequest = async (email: string) => {
-    // Verificar se já existe registro
-    const { data: existing } = await supabase
-      .from('usuarios_autorizados')
-      .select('id')
-      .eq('email', email)
-      .single();
-    
-    if (!existing) {
-      // Criar solicitação pendente
-      await supabase
-        .from('usuarios_autorizados')
-        .insert({ email, autorizado: false });
-    }
-  };
+  // checkAuthorization e registerAccessRequest agora centralizados em lib/auth.ts
 
   const handleGoogleLogin = async () => {
     setLoading(true);

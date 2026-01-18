@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Bell, Search, User, Check, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +34,7 @@ export function Header({ title, subtitle }: HeaderProps) {
   const [notificacoes, setNotificacoes] = useState<Notificacao[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const isFetching = useRef(false);
 
   useEffect(() => {
     loadNotificacoes();
@@ -44,6 +45,8 @@ export function Header({ title, subtitle }: HeaderProps) {
   }, []);
 
   const loadNotificacoes = async () => {
+    if (isFetching.current) return;
+    isFetching.current = true;
     try {
       // Buscar resultados não visualizados
       const { data: resultados, error: e1 } = await supabase
@@ -100,6 +103,7 @@ export function Header({ title, subtitle }: HeaderProps) {
       console.error("Erro ao carregar notificações:", error);
     } finally {
       setLoading(false);
+      isFetching.current = false;
     }
   };
 
